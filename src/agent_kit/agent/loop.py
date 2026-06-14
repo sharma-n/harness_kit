@@ -18,7 +18,6 @@ and episodic/factual writes are enqueued off the hot path.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from collections.abc import AsyncIterator
 
@@ -148,8 +147,18 @@ class Agent:
         # working buffer into the rolling summary. Episodic embedding is deferred to
         # conversation end (see ``end_conversation``), not written per turn.
         if final_text:
-            self._enqueue(self._factual.extract(user_id, user_message, final_text))
-        self._enqueue(self._working.maybe_rollover(conversation_id, user_id))
+            self._enqueue(
+                self._factual.extract(user_id, user_message, final_text),
+                operation="factual.extract",
+                user_id=user_id,
+                conversation_id=conversation_id,
+            )
+        self._enqueue(
+            self._working.maybe_rollover(conversation_id, user_id),
+            operation="working.rollover",
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
 
     async def end_conversation(self, user_id: str, conversation_id: str) -> None:
         """Embed the whole conversation as one episodic point and mark it finalized.
@@ -187,12 +196,26 @@ class Agent:
         for conversation_id, user_id in await self._working.due_for_finalize(
             idle_finalize_s
         ):
-            with contextlib.suppress(Exception):
+            try:
                 await self.end_conversation(user_id, conversation_id)
+            except Exception:
+                # Isolate per-conversation failures so one bad conversation does not
+                # stall the sweep — but log it (no longer silently suppressed).
+                # M9: a finalize-failure metric hook attaches here.
+                logger.warning(
+                    "idle finalize failed (user_id=%s conversation_id=%s)",
+                    user_id,
+                    conversation_id,
+                    exc_info=True,
+                )
 
-    def _enqueue(self, coro) -> None:
-        """Fire-and-forget a background memory write, with error isolation."""
-        task = asyncio.create_task(_guard(coro))
+    def _enqueue(
+        self, coro, *, operation: str, user_id: str, conversation_id: str
+    ) -> None:
+        """Fire-and-forget a background memory write, with error isolation + logging."""
+        task = asyncio.create_task(
+            _guard(coro, operation, user_id, conversation_id)
+        )
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
 
@@ -202,9 +225,29 @@ class Agent:
             await asyncio.gather(*list(self._bg_tasks), return_exceptions=True)
 
 
-async def _guard(coro) -> None:
-    with contextlib.suppress(Exception):
+async def _guard(
+    coro, operation: str, user_id: str, conversation_id: str
+) -> None:
+    """Run a background write, isolating + logging any terminal failure.
+
+    The single choke point where background-write failures surface. A ``StoreWriteError``
+    here means the store write exhausted its retries; an ``llm_kit.LLMError`` means the
+    upstream LLM/embedder step failed (already retried by llm_kit). Either way it is
+    logged once with full context and traceback. ``CancelledError`` is re-raised so
+    ``drain``/shutdown cancellation still works.
+    """
+    try:
         await coro
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # M9: a background-write-failure counter (by operation) attaches here.
+        logger.exception(
+            "background memory write failed: %s (user_id=%s conversation_id=%s)",
+            operation,
+            user_id,
+            conversation_id,
+        )
 
 
 def _accumulate(a: TokenUsage, b: TokenUsage) -> TokenUsage:

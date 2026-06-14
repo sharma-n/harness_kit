@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from agent_kit.config import WorkingMemoryConfig
 from agent_kit.llm import LLM
+from agent_kit.retry import RetryPolicy, store_write
 from agent_kit.stores.base import SessionStore
 from agent_kit.stores.types import SessionState, Turn
 from agent_kit.tokens import Estimator, estimate_tokens
@@ -42,11 +43,13 @@ class WorkingMemory:
         *,
         llm: LLM | None = None,
         estimator: Estimator = estimate_tokens,
+        store_retry: RetryPolicy | None = None,
     ) -> None:
         self._store = session_store
         self._cfg = cfg
         self._llm = llm  # only needed for rollover summarization
         self._estimate = estimator
+        self._store_retry = store_retry or RetryPolicy()
 
     async def load(self, conversation_id: str, user_id: str) -> WorkingSnapshot:
         """Read the buffer + rolling summary for a conversation.
@@ -82,7 +85,11 @@ class WorkingMemory:
         return await self._store.due_for_finalize(idle_s)
 
     async def mark_finalized(self, conversation_id: str) -> None:
-        await self._store.mark_finalized(conversation_id)
+        await store_write(
+            lambda: self._store.mark_finalized(conversation_id),
+            policy=self._store_retry,
+            operation="working.mark_finalized",
+        )
 
     def needs_rollover(self, buffer: list[Turn]) -> bool:
         """True when the verbatim buffer exceeds its token budget."""
@@ -108,7 +115,13 @@ class WorkingMemory:
             return
         state.rolling_summary = new_summary
         state.working_buffer = kept
-        await self._store.save(conversation_id, state)
+        # Retry only the store write; the summarizer invoke above is already retried by
+        # llm_kit, and re-running it on a store fault would waste a model call.
+        await store_write(
+            lambda: self._store.save(conversation_id, state),
+            policy=self._store_retry,
+            operation="working.rollover",
+        )
 
     def _split_for_rollover(self, buffer: list[Turn]) -> tuple[list[Turn], list[Turn]]:
         """Split into (kept newest within budget, evicted oldest). Always keeps the

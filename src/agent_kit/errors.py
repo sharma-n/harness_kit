@@ -31,3 +31,18 @@ class ContextOverflowError(AgentKitError):
 
 class BudgetExceededError(AgentKitError):
     """A turn exceeded its per-turn wall-clock budget."""
+
+
+class StoreWriteError(AgentKitError):
+    """A background store write exhausted its retries.
+
+    Raised by ``retry.retry_async`` when a memory-layer store write (e.g.
+    ``upsert_facts``, ``save``, ``add``, ``mark_finalized``) keeps failing. Carries
+    the ``operation`` label so the single choke-point log line distinguishes a
+    store-write failure from an LLM-step failure (``llm_kit.LLMError``). The
+    triggering backend exception is chained via ``raise ... from``.
+    """
+
+    def __init__(self, operation: str) -> None:
+        self.operation = operation
+        super().__init__(f"store write failed after retries: {operation}")

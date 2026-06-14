@@ -24,6 +24,7 @@ from agent_kit.llm import LLM, Embedder
 from agent_kit.memory.episodic import EpisodicMemory
 from agent_kit.memory.factual import FactualMemory
 from agent_kit.memory.working import WorkingMemory
+from agent_kit.retry import RetryPolicy
 from agent_kit.stores.factory import Stores, build_stores
 from agent_kit.tools.base import Tool
 from agent_kit.tools.native import recall_tool, remember_fact_tool
@@ -70,11 +71,23 @@ class AgentService:
             cleanups.append(shared_client.aclose)
 
         stores = build_stores(cfg)
-        working = WorkingMemory(stores.session, cfg.memory.working, llm=llm)
-        episodic = EpisodicMemory(
-            stores.vectors, embedder, cfg.memory.episodic, llm=llm
+        # Map the config's StoreRetryConfig onto the retry leaf's RetryPolicy (kept as
+        # two types so retry.py need not import config). Shared across all three writes.
+        store_retry = RetryPolicy(
+            max_retries=cfg.memory.store_retry.max_retries,
+            backoff_base_seconds=cfg.memory.store_retry.backoff_base_seconds,
+            backoff_max_seconds=cfg.memory.store_retry.backoff_max_seconds,
+            jitter_seconds=cfg.memory.store_retry.jitter_seconds,
         )
-        factual = FactualMemory(stores.profile, cfg.memory.factual, llm=llm)
+        working = WorkingMemory(
+            stores.session, cfg.memory.working, llm=llm, store_retry=store_retry
+        )
+        episodic = EpisodicMemory(
+            stores.vectors, embedder, cfg.memory.episodic, llm=llm, store_retry=store_retry
+        )
+        factual = FactualMemory(
+            stores.profile, cfg.memory.factual, llm=llm, store_retry=store_retry
+        )
 
         tools: list[Tool] = [remember_fact_tool(factual), recall_tool(episodic)]
         if extra_tools:

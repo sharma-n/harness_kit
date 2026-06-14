@@ -81,10 +81,28 @@ class FactualMemoryConfig:
 
 
 @dataclass(slots=True)
+class StoreRetryConfig:
+    """Retry policy for background store writes (maps onto ``retry.RetryPolicy``).
+
+    Covers agent_kit's own plain store writes only — the LLM ``invoke`` and embedder
+    calls in the same background ops are already retried by llm_kit's ``http.llm_retry``.
+    Defaults are smaller than llm_kit's HTTP retry (max_retries=5, base=0.5, max=30s)
+    because store writes are lower-latency and a long backoff would delay off-hot-path
+    rollover/finalize.
+    """
+
+    max_retries: int = 3
+    backoff_base_seconds: float = 0.2
+    backoff_max_seconds: float = 5.0
+    jitter_seconds: float = 0.1
+
+
+@dataclass(slots=True)
 class MemoryConfig:
     working: WorkingMemoryConfig = field(default_factory=WorkingMemoryConfig)
     episodic: EpisodicMemoryConfig = field(default_factory=EpisodicMemoryConfig)
     factual: FactualMemoryConfig = field(default_factory=FactualMemoryConfig)
+    store_retry: StoreRetryConfig = field(default_factory=StoreRetryConfig)
 
 
 @dataclass(slots=True)

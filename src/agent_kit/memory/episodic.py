@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from agent_kit.config import EpisodicMemoryConfig
 from agent_kit.llm import LLM, Embedder
+from agent_kit.retry import RetryPolicy, store_write
 from agent_kit.stores.base import VectorStore
 from agent_kit.stores.types import MemoryHit, MemoryPoint, Turn
 
@@ -33,11 +34,13 @@ class EpisodicMemory:
         cfg: EpisodicMemoryConfig,
         *,
         llm: LLM | None = None,
+        store_retry: RetryPolicy | None = None,
     ) -> None:
         self._store = vector_store
         self._embedder = embedder
         self._cfg = cfg
         self._llm = llm  # only needed when query_rewrite is enabled
+        self._store_retry = store_retry or RetryPolicy()
 
     async def retrieve(
         self, user_id: str, user_message: str, recent_turns: list[Turn]
@@ -79,7 +82,13 @@ class EpisodicMemory:
                 "ts": time.time(),
             },
         )
-        await self._store.add([point])
+        # Retry only the store write; the embed_one above is already retried by
+        # llm_kit, and re-running it on a store fault would waste an embedding call.
+        await store_write(
+            lambda: self._store.add([point]),
+            policy=self._store_retry,
+            operation="episodic.write_conversation",
+        )
 
     @staticmethod
     def _compose(summary: str, turns: list[Turn]) -> str:

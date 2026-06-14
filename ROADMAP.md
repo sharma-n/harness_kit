@@ -37,6 +37,27 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
   optional query-rewrite gated by config.
 - Golden test of the §6.6 worked example + budgeter tier-eviction tests.
 
+### ✅ M6 — Memory write paths
+- Read paths (episodic retrieve, factual get) on the hot path.
+- Factual write paths: `FactualMemory.extract` / `remember`; the loop **enqueues**
+  extraction fire-and-forget after `TurnComplete`.
+- Rolling-summary rollover (token-budget-driven): `WorkingMemory.maybe_rollover`
+  summarizes the oldest turns (`invoke`+`response_model` → fold into summary → drop
+  from buffer) when the buffer exceeds `buffer_token_budget`; enqueued after each turn.
+- Episodic embedding deferred to conversation end: `EpisodicMemory.write_conversation`
+  embeds the whole conversation as one point (deterministic per-conversation id, so a
+  later re-finalize upserts rather than duplicates). No per-turn embedding.
+- Transport-agnostic conversation-end trigger: a **two-stage idle lifecycle** on the
+  session — `idle_finalize_s` (embed the conversation, keep it resumable) then `ttl_s`
+  (evict). `Agent.end_conversation` fires on WS disconnect (fast path) **and** from a
+  background idle sweeper (`Agent.sweep_idle`, started in the serving lifespan) that
+  covers SSE (no disconnect signal) and abrupt WS drops. `finalized_at` makes finalize
+  idempotent and is cleared on new activity so resumed conversations re-finalize.
+- Robust background-write infrastructure: logging (choke point + sweep_idle + WS
+  disconnect) + store-write retry (exp backoff + jitter, wraps only store calls so
+  LLM/embedder never re-run). Tunable via `MemoryConfig.store_retry`; all background
+  store ops verified idempotent (except append-only `append_turn`).
+
 ### ✅ M7 — Serving
 - `serving/app.py`: FastAPI websocket + SSE; `serving/wire.py` event encoder;
   `service.py` composition root sharing one httpx session across LLM + embedder.
@@ -59,25 +80,6 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
 - ⬜ Curated/relevant tool-subset selection per turn (§6.3) to avoid sending 100
   tools every iteration.
 
-### 🟡 M6 — Memory write paths
-- ✅ Read paths (episodic retrieve, factual get) on the hot path.
-- ✅ Factual write paths: `FactualMemory.extract` / `remember`; the loop **enqueues**
-  extraction fire-and-forget after `TurnComplete`.
-- ✅ Rolling-summary rollover (token-budget-driven): `WorkingMemory.maybe_rollover`
-  summarizes the oldest turns (`invoke`+`response_model` → fold into summary → drop
-  from buffer) when the buffer exceeds `buffer_token_budget`; enqueued after each turn.
-- ✅ Episodic embedding deferred to conversation end: `EpisodicMemory.write_conversation`
-  embeds the whole conversation as one point (deterministic per-conversation id, so a
-  later re-finalize upserts rather than duplicates). No per-turn embedding.
-- ✅ Transport-agnostic conversation-end trigger: a **two-stage idle lifecycle** on the
-  session — `idle_finalize_s` (embed the conversation, keep it resumable) then `ttl_s`
-  (evict). `Agent.end_conversation` fires on WS disconnect (fast path) **and** from a
-  background idle sweeper (`Agent.sweep_idle`, started in the serving lifespan) that
-  covers SSE (no disconnect signal) and abrupt WS drops. `finalized_at` makes finalize
-  idempotent and is cleared on new activity so resumed conversations re-finalize.
-- ⬜ Robust background-write infrastructure (currently `asyncio.create_task` with
-  error suppression; no durability/retry if a write fails).
-
 ---
 
 ## Not started
@@ -90,8 +92,19 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
 - Stubs exist in `stores/stubs.py`; the same contract tests should run against them.
 
 ### ⬜ M8 — Offline jobs (`llm_kit` batch engine)
-- Nightly memory consolidation (summarize/dedupe/decay episodic points), bulk
-  re-embedding of a knowledge base, eval runs over conversation logs.
+- Nightly memory consolidation:
+  - **Episodic decay**: age-weight older conversation points lower so fresh context
+    ranks higher in retrieval without deleting older knowledge entirely.
+  - **Episodic deduplication**: semantic clustering — if two conversations are
+    sufficiently similar (cosine distance below threshold), merge them into a single
+    composite summary to keep the vector store lean.
+  - **Episodic re-summarization**: periodically re-embed and re-summarize long
+    conversation groups to reduce noise and keep embeddings current as user profile
+    evolves (e.g., quarterly pass over user's episodic points).
+  - Trade-off: keep recall broad (old context still findable) while prioritizing
+    relevance (new context ranks first) and keeping vector store scalable.
+- Bulk re-embedding of a knowledge base (when embedder changes or new docs added).
+- Eval runs over conversation logs (accuracy metrics, tool invocation patterns).
 
 ### ⬜ M9 — Observability + cost accounting
 - Spans/metrics: turn latency, time-to-first-token, loop iterations, tool latency,

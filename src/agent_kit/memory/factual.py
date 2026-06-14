@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from agent_kit.config import FactualMemoryConfig
 from agent_kit.llm import LLM
+from agent_kit.retry import RetryPolicy, store_write
 from agent_kit.stores.base import ProfileStore
 from agent_kit.stores.types import UserProfile
 
@@ -28,10 +29,12 @@ class FactualMemory:
         cfg: FactualMemoryConfig,
         *,
         llm: LLM | None = None,
+        store_retry: RetryPolicy | None = None,
     ) -> None:
         self._store = profile_store
         self._cfg = cfg
         self._llm = llm  # only needed for extraction
+        self._store_retry = store_retry or RetryPolicy()
 
     async def get(self, user_id: str) -> UserProfile:
         return await self._store.get(user_id)
@@ -58,4 +61,11 @@ class FactualMemory:
             response_model=ExtractedFacts,
         )
         if resp.parsed is not None and resp.parsed.facts:  # type: ignore[attr-defined]
-            await self._store.upsert_facts(user_id, dict(resp.parsed.facts))  # type: ignore[attr-defined]
+            facts = dict(resp.parsed.facts)  # type: ignore[attr-defined]
+            # Retry only the store write; the LLM invoke above is already retried by
+            # llm_kit, and re-running it on a store fault would waste a model call.
+            await store_write(
+                lambda: self._store.upsert_facts(user_id, facts),
+                policy=self._store_retry,
+                operation="factual.extract",
+            )
