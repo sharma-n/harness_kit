@@ -109,11 +109,21 @@ config.yaml    one global config; agent_kit sections + nested llm_kit block
 - **Episodic embedding is per-conversation, not per-turn** (`EpisodicMemory.write_conversation`,
   triggered by `Agent.end_conversation`). At conversation end the rolling summary +
   remaining buffer are embedded as ONE point — cheaper and more compact than per-turn,
-  trading per-turn recall precision for conversation-level memory. `end_conversation`
-  is best-effort (missing/expired session or non-owner caller → no-op). It is wired to
-  **WebSocket disconnect** in `serving/app.py`; **SSE has no disconnect signal**, so
-  SSE-only conversations are not yet finalized (an idle-TTL close hook is the planned
-  fix — see ROADMAP M6). If finer recall is later needed, revisit to per-N-turns/hybrid.
+  trading per-turn recall precision for conversation-level memory. The point id is
+  deterministic (`conv:{conversation_id}`) so re-finalizing a resumed conversation
+  upserts rather than duplicating. If finer recall is later needed, revisit to
+  per-N-turns/hybrid.
+
+- **Conversation end is a two-stage idle lifecycle, not a single TTL** (config
+  validates `idle_finalize_s < ttl_s`). `idle_finalize_s` fires first: the conversation
+  is embedded but the session stays loadable so a returning user resumes seamlessly;
+  `ttl_s` then evicts. `end_conversation` is best-effort and **idempotent** — missing/
+  expired session or non-owner caller → no-op; `SessionState.finalized_at` (cleared on
+  any new activity) stops re-embedding until the conversation is resumed. It is driven
+  from two places: **WebSocket disconnect** in `serving/app.py` (fast path) and a
+  **background idle sweeper** (`Agent.sweep_idle`, started in the serving lifespan,
+  cadence `sweep_interval_s`). The sweeper is what gives **SSE** — which has no
+  disconnect signal — a conversation-end event, and also catches abrupt WS drops.
 
 ## llm_kit gotchas (verified against the installed package)
 

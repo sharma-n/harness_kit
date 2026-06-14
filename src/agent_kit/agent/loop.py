@@ -152,21 +152,43 @@ class Agent:
         self._enqueue(self._working.maybe_rollover(conversation_id, user_id))
 
     async def end_conversation(self, user_id: str, conversation_id: str) -> None:
-        """Embed the whole conversation as one episodic point, then forget hot state.
+        """Embed the whole conversation as one episodic point and mark it finalized.
 
-        Called when a conversation ends (e.g. WebSocket disconnect / idle close).
-        Reads the rolling summary + remaining buffer, writes a single episodic point
-        so the conversation is recallable in future ones. Best-effort cleanup: a
-        missing/expired session, or a caller who does not own the conversation, is a
-        no-op (ownership is enforced by the load).
+        Called when a conversation ends: a WebSocket disconnect (fast path) or the
+        idle sweeper (backstop that also covers SSE, which has no disconnect signal).
+        Reads the rolling summary + remaining buffer and writes a single episodic
+        point so the conversation is recallable later.
+
+        Idempotent and best-effort: a missing/expired session, or a caller who does
+        not own the conversation, is a no-op (ownership enforced by the read). The
+        session is left in place so the user can resume seamlessly until ``ttl_s``
+        evicts it; ``mark_finalized`` keeps the sweeper from re-embedding it until
+        new activity clears the mark.
         """
         try:
-            snapshot = await self._working.load(conversation_id, user_id)
+            snapshot = await self._working.peek(conversation_id, user_id)
         except UnauthorizedError:
+            return
+        if snapshot is None:
             return
         await self._episodic.write_conversation(
             user_id, conversation_id, snapshot.summary, snapshot.buffer
         )
+        await self._working.mark_finalized(conversation_id)
+
+    async def sweep_idle(self, idle_finalize_s: float) -> None:
+        """Finalize every conversation idle past ``idle_finalize_s``.
+
+        The transport-agnostic backstop for conversation-end: SSE has no disconnect
+        signal and even WebSockets can drop abruptly without firing their handler.
+        Each conversation is finalized at most once per idle cycle (``mark_finalized``);
+        failures are isolated so one bad conversation does not stall the sweep.
+        """
+        for conversation_id, user_id in await self._working.due_for_finalize(
+            idle_finalize_s
+        ):
+            with contextlib.suppress(Exception):
+                await self.end_conversation(user_id, conversation_id)
 
     def _enqueue(self, coro) -> None:
         """Fire-and-forget a background memory write, with error isolation."""

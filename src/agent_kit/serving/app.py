@@ -17,8 +17,12 @@ stalling the shared event loop (other connections run as independent tasks).
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import logging
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
@@ -28,9 +32,24 @@ from agent_kit.errors import UnauthorizedError
 from agent_kit.service import AgentService
 from agent_kit.serving.wire import encode_event
 
+logger = logging.getLogger(__name__)
+
 
 def create_app(service: AgentService) -> FastAPI:
-    app = FastAPI(title="agent_kit")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Background idle sweeper: finalizes conversations that have gone idle past
+        # ``idle_finalize_s``. This is the transport-agnostic conversation-end signal
+        # — SSE never disconnects and WebSockets can drop without firing their handler.
+        sweeper = asyncio.create_task(_idle_sweep_loop(service))
+        try:
+            yield
+        finally:
+            sweeper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sweeper
+
+    app = FastAPI(title="agent_kit", lifespan=lifespan)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -86,6 +105,17 @@ def create_app(service: AgentService) -> FastAPI:
 
 def _sse_frame(data: dict) -> bytes:
     return f"data: {json.dumps(data)}\n\n".encode()
+
+
+async def _idle_sweep_loop(service: AgentService) -> None:
+    """Periodically finalize idle conversations until the app shuts down."""
+    cfg = service.cfg.memory.working
+    while True:
+        await asyncio.sleep(cfg.sweep_interval_s)
+        try:
+            await service.agent.sweep_idle(cfg.idle_finalize_s)
+        except Exception:  # never let a sweep failure kill the loop
+            logger.exception("idle sweep failed")
 
 
 def create_app_from_yaml(path: str = "config.yaml") -> FastAPI:

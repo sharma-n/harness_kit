@@ -10,7 +10,6 @@ recall precision for coarse-grained, conversation-level memory.
 from __future__ import annotations
 
 import time
-import uuid
 
 from pydantic import BaseModel
 
@@ -67,7 +66,10 @@ class EpisodicMemory:
             return
         vector = (await self._embedder.embed_one(text)).vector
         point = MemoryPoint(
-            id=str(uuid.uuid4()),
+            # Deterministic per conversation: if a resumed conversation is finalized
+            # again later, the new (fuller) point upserts the old one rather than
+            # accumulating duplicates. conversation_id is globally unique to one user.
+            id=f"conv:{conversation_id}",
             vector=vector,
             payload={
                 "user_id": user_id,

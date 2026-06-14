@@ -39,6 +39,7 @@ class InMemorySessionStore:
 
     async def save(self, conversation_id: str, state: SessionState) -> None:
         state.updated_at = time.time()
+        state.finalized_at = None  # new activity → needs re-finalize when idle again
         self._sessions[conversation_id] = state
 
     async def append_turn(self, conversation_id: str, turn: Turn) -> None:
@@ -47,3 +48,17 @@ class InMemorySessionStore:
             raise KeyError(f"no session {conversation_id!r}; call save() first")
         state.working_buffer.append(turn)
         state.updated_at = time.time()
+        state.finalized_at = None  # new activity → needs re-finalize when idle again
+
+    async def due_for_finalize(self, idle_s: float) -> list[tuple[str, str]]:
+        now = time.time()
+        return [
+            (conversation_id, state.user_id)
+            for conversation_id, state in self._sessions.items()
+            if state.finalized_at is None and now - state.updated_at >= idle_s
+        ]
+
+    async def mark_finalized(self, conversation_id: str) -> None:
+        state = self._sessions.get(conversation_id)
+        if state is not None:
+            state.finalized_at = time.time()

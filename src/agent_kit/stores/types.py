@@ -37,6 +37,11 @@ class SessionState:
     rolling_summary: str = ""
     scratch: dict[str, Any] = field(default_factory=dict)
     updated_at: float = field(default_factory=time.time)
+    # Set when the conversation has been embedded as an episodic point at idle.
+    # Cleared on any new activity (save/append_turn) so a resumed conversation is
+    # re-finalized later. Lets the idle sweeper finalize each conversation once per
+    # idle cycle without re-embedding it on every pass.
+    finalized_at: float | None = None
 
 
 @dataclass(slots=True)

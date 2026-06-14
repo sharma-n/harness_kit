@@ -40,6 +40,18 @@ class SessionStore(Protocol):
 
     async def append_turn(self, conversation_id: str, turn: Turn) -> None: ...
 
+    async def due_for_finalize(self, idle_s: float) -> list[tuple[str, str]]:
+        """Return ``(conversation_id, user_id)`` for sessions idle ≥ ``idle_s``
+        that have not yet been finalized — the idle sweeper's work queue.
+        """
+        ...
+
+    async def mark_finalized(self, conversation_id: str) -> None:
+        """Record that a conversation has been finalized (episodic point written),
+        so it is not re-finalized until new activity clears the mark.
+        """
+        ...
+
 
 @runtime_checkable
 class ProfileStore(Protocol):

@@ -66,10 +66,12 @@ sequenceDiagram
     Transport-->>User: stream of encoded JSON frames
 
     rect rgb(245, 235, 255)
-        note over Transport,Episodic: Conversation end (WS disconnect / idle close) — once per conversation
-        Transport->>Agent: end_conversation(user_id, conversation_id)
-        Agent->>Working: load(summary + remaining buffer)
+        note over Transport,Episodic: Conversation end — WS disconnect OR background idle sweeper (covers SSE)
+        Transport->>Agent: end_conversation(user_id, conversation_id)  [on WS disconnect]
+        Agent->>Agent: sweep_idle(idle_finalize_s)  [periodic; finalizes idle conversations]
+        Agent->>Working: peek(summary + remaining buffer)
         Agent-->>Episodic: write_conversation() — embed ONE point for the whole conversation
+        Agent->>Working: mark_finalized() — idempotent until new activity
     end
 ```
 
@@ -126,9 +128,23 @@ Note: episodic embedding does **not** happen here. It is deferred to conversatio
 
 Finally, `TurnComplete` is yielded with token usage, iteration count, and stop reason.
 
-### 6. Conversation end — `agent/loop.py` (`end_conversation`)
+### 6. Conversation end — `agent/loop.py` (`end_conversation`, `sweep_idle`)
 
-When a conversation ends (WebSocket disconnect, or a future idle-close hook), `serving/app.py` calls `Agent.end_conversation()`. This loads the rolling summary + remaining buffer and embeds the **whole conversation as a single episodic point** via `EpisodicMemory.write_conversation()`. Embedding once per conversation (rather than once per turn) keeps the vector store compact and embedding cost low, trading per-turn recall precision for conversation-level memory. It is best-effort: a missing/expired session or a non-owner caller is a no-op.
+When a conversation ends, `Agent.end_conversation()` reads the rolling summary + remaining buffer and embeds the **whole conversation as a single episodic point** via `EpisodicMemory.write_conversation()`. Embedding once per conversation (rather than once per turn) keeps the vector store compact and embedding cost low, trading per-turn recall precision for conversation-level memory. It is best-effort and **idempotent**: a missing/expired session or non-owner caller is a no-op, and `SessionState.finalized_at` stops it re-embedding until new activity.
+
+**Two-stage idle lifecycle** (config validates `idle_finalize_s < ttl_s`):
+
+| Timer | What fires | Effect |
+|---|---|---|
+| `idle_finalize_s` (e.g. 15 min) | `end_conversation()` | Embeds the conversation; **session is kept** so the user can resume seamlessly |
+| `ttl_s` (e.g. 60 min) | session-store eviction | Session removed; already finalized, so no memory is lost |
+
+`end_conversation()` is reached two ways:
+
+- **WebSocket disconnect** (fast path): `serving/app.py` calls it when the socket closes.
+- **Background idle sweeper** (`Agent.sweep_idle`, started in the serving **lifespan**, scanning every `sweep_interval_s`): finalizes any conversation idle past `idle_finalize_s`. This is the only conversation-end signal **SSE** gets — SSE is one-directional and never reports a disconnect — and it also catches abrupt WS drops that never fire their handler.
+
+**Resuming after finalize:** if the user returns before `ttl_s` eviction, the session is still there with full history, so the conversation simply continues; appending a turn clears `finalized_at`, so it will be finalized again later. Because the episodic point id is deterministic per conversation, that second finalize **upserts** the single point rather than creating a duplicate. If the user returns only after `ttl_s` eviction, a fresh working buffer starts, but the earlier conversation is still recallable via episodic search.
 
 ## Code Map
 

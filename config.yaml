@@ -12,7 +12,9 @@ memory:
   working:
     buffer_turns: 12
     buffer_token_budget: 2048
-    ttl_s: 3600
+    idle_finalize_s: 900   # idle → embed conversation (kept resumable); must be < ttl_s
+    ttl_s: 3600            # idle → evict session (already finalized by now)
+    sweep_interval_s: 60   # how often the idle sweeper scans
   episodic:
     top_k: 3
     min_score: 0.3

@@ -46,7 +46,25 @@ class WorkingMemoryConfig:
     # estimated size exceeds this, the oldest turns are summarized into the rolling
     # summary and dropped. Keeps the verbatim buffer bounded regardless of turn size.
     buffer_token_budget: int = 2048
+    # Two-stage idle lifecycle (must satisfy idle_finalize_s < ttl_s):
+    #   idle_finalize_s — after this much idle, the conversation is *finalized*
+    #     (embedded as one episodic point) but the session is kept loadable so the
+    #     user can resume seamlessly. This is the transport-agnostic backstop that
+    #     gives SSE the conversation-end signal a WebSocket disconnect provides.
+    #   ttl_s — after this much idle, the session is *evicted* from the store. By
+    #     then it has already been finalized, so no memory is lost on eviction.
+    idle_finalize_s: int = 900
     ttl_s: int = 3600
+    # How often the idle sweeper scans for conversations due to finalize.
+    sweep_interval_s: int = 60
+
+    def __post_init__(self) -> None:
+        if self.idle_finalize_s >= self.ttl_s:
+            raise ValueError(
+                "working memory: idle_finalize_s must be < ttl_s so a conversation "
+                f"is finalized before it is evicted (got idle_finalize_s="
+                f"{self.idle_finalize_s}, ttl_s={self.ttl_s})"
+            )
 
 
 @dataclass(slots=True)

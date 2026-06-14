@@ -67,12 +67,16 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
   summarizes the oldest turns (`invoke`+`response_model` → fold into summary → drop
   from buffer) when the buffer exceeds `buffer_token_budget`; enqueued after each turn.
 - ✅ Episodic embedding deferred to conversation end: `EpisodicMemory.write_conversation`
-  embeds the whole conversation as one point; `Agent.end_conversation` is invoked on WS
-  disconnect. No per-turn embedding.
+  embeds the whole conversation as one point (deterministic per-conversation id, so a
+  later re-finalize upserts rather than duplicates). No per-turn embedding.
+- ✅ Transport-agnostic conversation-end trigger: a **two-stage idle lifecycle** on the
+  session — `idle_finalize_s` (embed the conversation, keep it resumable) then `ttl_s`
+  (evict). `Agent.end_conversation` fires on WS disconnect (fast path) **and** from a
+  background idle sweeper (`Agent.sweep_idle`, started in the serving lifespan) that
+  covers SSE (no disconnect signal) and abrupt WS drops. `finalized_at` makes finalize
+  idempotent and is cleared on new activity so resumed conversations re-finalize.
 - ⬜ Robust background-write infrastructure (currently `asyncio.create_task` with
   error suppression; no durability/retry if a write fails).
-- ⬜ Conversation-end trigger beyond WS disconnect (idle-TTL close hook; SSE has no
-  disconnect signal, so its conversations are not yet finalized).
 
 ---
 
@@ -128,6 +132,11 @@ Plan when we get there:
   per conversation; cheaper and more scalable. Trades per-turn specificity for
   compactness and cost. Can revisit to per-N-turns or per-turn if finer granularity
   is needed.
+- **Two-stage idle lifecycle**: `idle_finalize_s` < `ttl_s`, by construction (config
+  validates it). The shorter timer finalizes (embeds) the conversation but keeps the
+  session loadable so a returning user resumes seamlessly; the longer timer evicts.
+  Finalize is driven by a periodic sweeper (not per-request) so it is transport-agnostic
+  — the only way SSE, which has no disconnect signal, gets a conversation-end event.
 
 ## Open questions (SPEC §16) — current stance
 - **Transcript durability**: deferred. Redis working buffer + episodic are the only

@@ -62,8 +62,27 @@ class WorkingMemory:
             buffer=list(state.working_buffer), summary=state.rolling_summary
         )
 
+    async def peek(self, conversation_id: str, user_id: str) -> WorkingSnapshot | None:
+        """Read-only load: return the snapshot, or ``None`` if the session is
+        absent/expired. Unlike ``load`` it never creates a session — used by the
+        conversation-end / idle-finalize path, which must not resurrect dead state.
+        """
+        state = await self._store.load(conversation_id, user_id)
+        if state is None:
+            return None
+        return WorkingSnapshot(
+            buffer=list(state.working_buffer), summary=state.rolling_summary
+        )
+
     async def append_turn(self, conversation_id: str, turn: Turn) -> None:
         await self._store.append_turn(conversation_id, turn)
+
+    async def due_for_finalize(self, idle_s: float) -> list[tuple[str, str]]:
+        """``(conversation_id, user_id)`` for idle, not-yet-finalized conversations."""
+        return await self._store.due_for_finalize(idle_s)
+
+    async def mark_finalized(self, conversation_id: str) -> None:
+        await self._store.mark_finalized(conversation_id)
 
     def needs_rollover(self, buffer: list[Turn]) -> bool:
         """True when the verbatim buffer exceeds its token budget."""

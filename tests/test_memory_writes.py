@@ -125,3 +125,100 @@ async def test_end_conversation_for_non_owner_is_noop():
     await service.agent.end_conversation("bob", "c1")
 
     assert service.stores.vectors._points == {}
+
+
+async def test_end_conversation_is_idempotent():
+    """Finalizing twice (e.g. WS disconnect then a sweeper pass) writes one point."""
+    base = AgentKitConfig()
+    service, _ = make_service(base, turns=[ScriptedTurn(text_chunks=["hello"])])
+    await _run(service.agent, msg="hi there")
+
+    await service.agent.end_conversation("alice", "c1")
+    await service.agent.end_conversation("alice", "c1")
+
+    assert len(service.stores.vectors._points) == 1
+
+
+# --------------------------------------------------- idle sweeper (two-stage TTL)
+
+
+async def test_idle_finalize_s_must_be_less_than_ttl_s():
+    import pytest
+
+    with pytest.raises(ValueError):
+        WorkingMemoryConfig(idle_finalize_s=3600, ttl_s=3600)
+
+
+async def test_due_for_finalize_lists_idle_unfinalized_sessions():
+    store = InMemorySessionStore()
+    await _seed(store, "c1", "alice", ["hello"])
+    # Force the session's clock back so it reads as idle.
+    state = await store.load("c1", "alice")
+    state.updated_at -= 1000
+
+    due = await store.due_for_finalize(idle_s=900)
+    assert due == [("c1", "alice")]
+
+    # Once finalized it drops off the work queue until new activity.
+    await store.mark_finalized("c1")
+    assert await store.due_for_finalize(idle_s=900) == []
+
+
+async def test_new_activity_clears_finalized_mark():
+    store = InMemorySessionStore()
+    await _seed(store, "c1", "alice", ["hello"])
+    await store.mark_finalized("c1")
+
+    await store.append_turn("c1", Turn(role="user", text="back again"))
+
+    state = await store.load("c1", "alice")
+    assert state.finalized_at is None  # resumed → eligible to be finalized again
+
+
+async def test_sweep_idle_finalizes_idle_sse_conversation():
+    """The sweeper gives SSE (no disconnect) a conversation-end signal."""
+    base = AgentKitConfig()
+    service, _ = make_service(base, turns=[ScriptedTurn(text_chunks=["welcome"])])
+    await _run(service.agent, msg="remember I'm vegetarian")
+
+    # No disconnect ever fires; age the session past the finalize threshold.
+    state = await service.stores.session.load("c1", "alice")
+    state.updated_at -= 1000
+
+    await service.agent.sweep_idle(idle_finalize_s=900)
+
+    points = list(service.stores.vectors._points.values())
+    assert len(points) == 1
+    assert "remember I'm vegetarian" in points[0].payload["text"]
+    # A second sweep with no new activity must not re-embed.
+    await service.agent.sweep_idle(idle_finalize_s=900)
+    assert len(service.stores.vectors._points) == 1
+
+
+async def test_resume_after_finalize_keeps_same_conversation():
+    """Coming back before ttl_s eviction continues the same conversation, and a
+    later finalize upserts the single per-conversation point (no duplicate)."""
+    base = AgentKitConfig()
+    service, _ = make_service(
+        base, turns=[ScriptedTurn(text_chunks=["one"]), ScriptedTurn(text_chunks=["two"])]
+    )
+    await _run(service.agent, msg="first message")
+
+    state = await service.stores.session.load("c1", "alice")
+    state.updated_at -= 1000
+    await service.agent.sweep_idle(idle_finalize_s=900)
+    assert len(service.stores.vectors._points) == 1
+
+    # User returns: same session, full history preserved.
+    await _run(service.agent, msg="second message")
+    snapshot = await service.agent._working.peek("c1", "alice")
+    texts = [t.text for t in snapshot.buffer]
+    assert "first message" in texts and "second message" in texts
+
+    # Finalize again → upsert, still exactly one point, now covering both turns.
+    state = await service.stores.session.load("c1", "alice")
+    state.updated_at -= 1000
+    await service.agent.sweep_idle(idle_finalize_s=900)
+    points = list(service.stores.vectors._points.values())
+    assert len(points) == 1
+    assert "second message" in points[0].payload["text"]
