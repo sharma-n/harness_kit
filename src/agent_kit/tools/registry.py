@@ -1,0 +1,103 @@
+"""Tool registry (SPEC §8) — unifies native + (future) MCP tools, user-scoped.
+
+The registry is the per-user authorization seam for tools:
+  - ``definitions(user_id)`` returns only the tools that user is allowed to use,
+    so the model is never even offered a tool outside the user's allowlist.
+  - ``execute(user_id, call)`` re-checks permission before running (defense in
+    depth), applies a per-tool timeout, and turns *every* failure — denied,
+    unknown, raised, timed out — into a ``ToolResult(ok=False)`` observation
+    rather than raising. Tool errors are observations, not exceptions (SPEC §5).
+
+The full observation text is fed back to the model; ``ToolResult.content`` shown
+in the UI trace is truncated.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+
+from llm_kit import ToolCall, ToolDefinition
+
+from agent_kit.stores.base import PermissionStore
+from agent_kit.tools.base import Tool
+
+_DISPLAY_TRUNCATE = 500
+
+
+@dataclass(slots=True)
+class Execution:
+    """Result of running one tool call.
+
+    ``display`` is truncated for the UI trace; ``observation`` is the full text
+    fed back to the model. The agent loop maps this into a ``ToolResult`` event —
+    keeping ``tools/`` below ``agent/`` in the layering.
+    """
+
+    call_id: str
+    name: str
+    ok: bool
+    display: str
+    observation: str
+
+
+class ToolRegistry:
+    def __init__(
+        self,
+        tools: list[Tool],
+        permissions: PermissionStore,
+        *,
+        per_tool_timeout_s: float = 30.0,
+    ) -> None:
+        self._tools = {t.name: t for t in tools}
+        self._permissions = permissions
+        self._timeout = per_tool_timeout_s
+
+    def register(self, tool: Tool) -> None:
+        self._tools[tool.name] = tool
+
+    async def definitions(self, user_id: str) -> list[ToolDefinition]:
+        """Only the tools this user is allowed to use, in registration order."""
+        allowed = await self._permissions.allowed_tools(user_id)
+        return [t.definition for name, t in self._tools.items() if name in allowed]
+
+    async def execute(self, user_id: str, call: ToolCall) -> Execution:
+        allowed = await self._permissions.allowed_tools(user_id)
+        if call.name not in allowed:
+            return self._failure(call, f"tool {call.name!r} is not permitted for this user")
+
+        tool = self._tools.get(call.name)
+        if tool is None:
+            return self._failure(call, f"unknown tool {call.name!r}")
+
+        try:
+            async with asyncio.timeout(self._timeout):
+                content = await tool.handler(user_id, call.arguments)
+        except asyncio.TimeoutError:
+            return self._failure(call, f"tool {call.name!r} timed out after {self._timeout}s")
+        except Exception as exc:  # tool errors are observations, never crashes
+            return self._failure(call, f"tool {call.name!r} failed: {exc}")
+
+        return self._success(call, content)
+
+    def _success(self, call: ToolCall, content: str) -> Execution:
+        return Execution(
+            call_id=call.id,
+            name=call.name,
+            ok=True,
+            display=_truncate(content),
+            observation=content,
+        )
+
+    def _failure(self, call: ToolCall, message: str) -> Execution:
+        return Execution(
+            call_id=call.id,
+            name=call.name,
+            ok=False,
+            display=_truncate(message),
+            observation=message,
+        )
+
+
+def _truncate(text: str, limit: int = _DISPLAY_TRUNCATE) -> str:
+    return text if len(text) <= limit else text[:limit] + "… [truncated]"

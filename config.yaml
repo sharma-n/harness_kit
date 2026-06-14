@@ -1,0 +1,65 @@
+# agent_kit example config. One global file for all users; memory and tool
+# permissions are per-user and live in the stores, never here.
+
+agent:
+  max_iterations: 6
+  per_tool_timeout_s: 30.0
+  system_prompt: |
+    You are a helpful, friendly assistant with memory of past conversations.
+    Use what you know about the user, but never invent facts.
+
+memory:
+  working:
+    buffer_turns: 12
+    summary_trigger: 16
+    ttl_s: 3600
+  episodic:
+    top_k: 3
+    min_score: 0.3
+    query_augment_turns: 2
+    query_rewrite: false
+  factual:
+    extraction_enabled: true
+
+context:
+  max_input_tokens: 128000
+  output_reserve_tokens: 4096
+  safety_margin: 1024
+
+stores:
+  session_backend: memory
+  profile_backend: memory
+  vector_backend: memory
+  permission_backend: memory
+  redis:
+    url: ${REDIS_URL:-redis://localhost:6379/0}
+  sqlite:
+    url: ${SQLITE_URL:-sqlite+aiosqlite:///agent_kit.db}
+  qdrant:
+    url: ${QDRANT_URL:-http://localhost:6333}
+    collection: episodic_memory
+
+mcp:
+  servers: []
+
+tools:
+  # Global fallback allowlist for users with no per-user grant in the store.
+  default_allowed:
+    - remember_fact
+    - recall
+
+# Nested block handed wholesale to llm_kit's AppConfig.
+llm_kit:
+  llm:
+    message_format: openai
+    base_url: ${OPENAI_BASE_URL:-https://api.openai.com}
+    model: ${AGENT_MODEL:-gpt-4o-mini}
+    api_key_env: OPENAI_API_KEY
+    max_tokens: 4096
+  embed:
+    base_url: ${OPENAI_BASE_URL:-https://api.openai.com}
+    model: ${EMBED_MODEL:-text-embedding-3-small}
+    api_key_env: OPENAI_API_KEY
+  rate_limit:
+    max_concurrent_requests: 16
+    requests_per_minute: 500

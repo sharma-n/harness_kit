@@ -1,0 +1,105 @@
+"""Composition root: wire config → stores → memory → tools → agent.
+
+``AgentService`` owns the shared ``httpx.AsyncClient`` (one session feeding both
+the LLM client and the embedder), the store bundle, and the assembled ``Agent``.
+``serving/`` constructs one of these and streams ``agent.run_turn`` per request.
+
+Building the real llm_kit clients is isolated here so the rest of the package
+depends only on the ``LLM`` / ``Embedder`` Protocols and is testable with fakes.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Self
+
+from llm_kit import LLMClient, OpenAICompatibleEmbedder
+from llm_kit.http.session import build_async_client
+
+from agent_kit.agent.budgeter import ContextBudgeter
+from agent_kit.agent.context import ContextBuilder
+from agent_kit.agent.loop import Agent
+from agent_kit.config import AgentKitConfig
+from agent_kit.llm import LLM, Embedder
+from agent_kit.memory.episodic import EpisodicMemory
+from agent_kit.memory.factual import FactualMemory
+from agent_kit.memory.working import WorkingMemory
+from agent_kit.stores.factory import Stores, build_stores
+from agent_kit.tools.base import Tool
+from agent_kit.tools.native import recall_tool, remember_fact_tool
+from agent_kit.tools.registry import ToolRegistry
+
+
+@dataclass(slots=True)
+class AgentService:
+    cfg: AgentKitConfig
+    stores: Stores
+    agent: Agent
+    _aclose: object = None  # callable cleanup, set by build()
+
+    @classmethod
+    def from_yaml(cls, path: str) -> Self:
+        return cls.build(AgentKitConfig.from_yaml(path))
+
+    @classmethod
+    def build(
+        cls,
+        cfg: AgentKitConfig,
+        *,
+        llm: LLM | None = None,
+        embedder: Embedder | None = None,
+        extra_tools: list[Tool] | None = None,
+    ) -> Self:
+        """Assemble the service. Inject ``llm``/``embedder`` for tests; otherwise
+        the real llm_kit clients are built over one shared HTTP session."""
+        shared_client = None
+        cleanups = []
+        if llm is None or embedder is None:
+            shared_client = build_async_client(cfg.llm_kit.http)
+        if llm is None:
+            real_llm = LLMClient(cfg.llm_kit, client=shared_client, owns_client=False)
+            llm = real_llm
+            cleanups.append(real_llm.aclose)
+        if embedder is None:
+            real_embedder = OpenAICompatibleEmbedder(
+                cfg.llm_kit, client=shared_client, owns_client=False
+            )
+            embedder = real_embedder
+            cleanups.append(real_embedder.aclose)
+        if shared_client is not None:
+            cleanups.append(shared_client.aclose)
+
+        stores = build_stores(cfg)
+        working = WorkingMemory(stores.session, cfg.memory.working)
+        episodic = EpisodicMemory(
+            stores.vectors, embedder, cfg.memory.episodic, llm=llm
+        )
+        factual = FactualMemory(stores.profile, cfg.memory.factual, llm=llm)
+
+        tools: list[Tool] = [remember_fact_tool(factual), recall_tool(episodic)]
+        if extra_tools:
+            tools.extend(extra_tools)
+        registry = ToolRegistry(
+            tools, stores.permissions, per_tool_timeout_s=cfg.agent.per_tool_timeout_s
+        )
+
+        builder = ContextBuilder(
+            agent_cfg=cfg.agent,
+            working=working,
+            episodic=episodic,
+            factual=factual,
+            registry=registry,
+            budgeter=ContextBudgeter(cfg.context),
+        )
+        agent = Agent(llm, builder, registry, working, episodic, factual, cfg.agent)
+
+        async def _aclose() -> None:
+            await agent.drain()
+            for close in cleanups:
+                await close()
+
+        return cls(cfg=cfg, stores=stores, agent=agent, _aclose=_aclose)
+
+    async def aclose(self) -> None:
+        if callable(self._aclose):
+            await self._aclose()
