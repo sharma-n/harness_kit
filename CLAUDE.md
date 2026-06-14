@@ -48,7 +48,11 @@ This is a hard requirement, threaded through every layer:
 
 When adding anything that touches user data, ask: is it scoped to `user_id`? If a
 new store/cache holds per-user state in process memory without a shared-store
-backing, that breaks horizontal scaling (SPEC §12) — don't.
+backing, that breaks horizontal scaling (SPEC §12) — don't. (The one deliberate,
+documented exception is the M10 tool rate limiter in `tools/ratelimit.py`: per-user
+token buckets are in-process, mirroring `llm_kit`'s own limiter — so a multi-worker
+deploy enforces ~`workers × rate_limit_per_minute`. A Redis backing is a later
+scaling step, noted in the module docstring.)
 
 ## Async end-to-end
 
@@ -65,8 +69,9 @@ src/agent_kit/
                · stubs.py (real adapters, NotImplementedError) · factory.py (backend select)
   memory/      working.py (buffer + token-budget rollover) · episodic.py (conversation-end
                embed) · factual.py   (cognition over the stores)
-  tools/       base.py (Tool) · registry.py (user-scoped exec) · native.py
-               · mcp.py (MCPServerClient connect/discover + MCPManager aggregate)
+  tools/       base.py (Tool) · registry.py (user-scoped exec + per-tool policy) · native.py
+               · ratelimit.py (in-process per-user token bucket) · mcp.py (MCPServerClient
+               connect/discover + MCPManager aggregate)
   agent/       events.py (AgentEvent) · context.py (assembly §6.2) · budgeter.py (tiers §6.5)
                · loop.py (run_turn §5 + end_conversation)
   serving/     wire.py (AgentEvent→frame) · app.py (FastAPI ws + sse)
@@ -167,7 +172,7 @@ config.yaml    one global config; agent_kit sections + nested llm_kit block
 
 ```bash
 uv sync --extra dev --extra mcp     # use --native-tls on this machine
-uv run pytest                       # 63 tests, no network/Docker
+uv run pytest                       # 72 tests, no network/Docker
 OPENAI_API_KEY=... uv run python examples/single_turn.py
 OPENAI_API_KEY=... uv run uvicorn "agent_kit.serving.app:create_app_from_yaml" --factory
 ```

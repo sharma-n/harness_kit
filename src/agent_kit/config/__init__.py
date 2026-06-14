@@ -16,6 +16,7 @@ from agent_kit.config.schema import (
     StoreBackend,
     StoreRetryConfig,
     StoresConfig,
+    ToolPolicy,
     ToolsConfig,
     WorkingMemoryConfig,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "StoreBackend",
     "StoreRetryConfig",
     "StoresConfig",
+    "ToolPolicy",
     "ToolsConfig",
     "WorkingMemoryConfig",
 ]

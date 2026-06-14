@@ -9,6 +9,7 @@ they are needed.
 from __future__ import annotations
 
 from agent_kit.stores.types import (
+    ConversationMeta,
     MemoryHit,
     MemoryPoint,
     SessionState,
@@ -30,6 +31,7 @@ class RedisSessionStore:
     async def append_turn(self, conversation_id: str, turn: Turn) -> None: ...
     async def due_for_finalize(self, idle_s: float) -> list[tuple[str, str]]: ...
     async def mark_finalized(self, conversation_id: str) -> None: ...
+    async def list(self, user_id: str) -> list[ConversationMeta]: ...
 
 
 class SqliteProfileStore:

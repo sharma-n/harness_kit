@@ -16,6 +16,7 @@ from agent_kit.agent.events import (
     ToolResult,
     TurnComplete,
 )
+from agent_kit.stores.types import ConversationMeta
 
 
 def encode_event(event: AgentEvent) -> dict[str, Any]:
@@ -44,3 +45,16 @@ def encode_event(event: AgentEvent) -> dict[str, Any]:
             "stop_reason": event.stop_reason,
         }
     raise TypeError(f"unknown event type: {type(event).__name__}")
+
+
+def encode_conversation(meta: ConversationMeta) -> dict[str, Any]:
+    """Conversation metadata → JSON frame for the ``/conversations`` listing (M11)."""
+    return {
+        "conversation_id": meta.conversation_id,
+        "user_id": meta.user_id,
+        "created_at": meta.created_at,
+        "updated_at": meta.updated_at,
+        "finalized_at": meta.finalized_at,
+        "turn_count": meta.turn_count,
+        "summary_preview": meta.summary_preview,
+    }

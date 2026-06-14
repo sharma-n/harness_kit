@@ -65,6 +65,15 @@ tools:
     - forget_fact
     - list_facts
     - recall
+  # Optional per-tool execution policy (keyed by tool name). Unset fields fall back to
+  # globals: timeout → agent.per_tool_timeout_s, rate limit → unlimited. Rate limits are
+  # per-user, in-process (so a multi-worker deploy enforces ~workers × the configured
+  # rate). Both a timed-out and a rate-limited call become an ok=False tool observation.
+  definitions: {}
+    # slow_external_api:
+    #   timeout_s: 60.0            # generous timeout for a slow upstream
+    # remember_fact:
+    #   rate_limit_per_minute: 30  # cap a high-volume tool per user
 
 # Nested block handed wholesale to llm_kit's AppConfig.
 llm_kit:

@@ -42,6 +42,29 @@ class SessionState:
     # re-finalized later. Lets the idle sweeper finalize each conversation once per
     # idle cycle without re-embedding it on every pass.
     finalized_at: float | None = None
+    # When the conversation was first created. Stable across resumes (set once at
+    # construction); surfaced by ``SessionStore.list`` for conversation listing (M11).
+    created_at: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class ConversationMeta:
+    """Lightweight conversation metadata for listing (M11) — no transcript.
+
+    Built by ``SessionStore.list`` so a chat UI can render history without pulling
+    full buffers. ``summary_preview`` is a truncated slice of the rolling summary.
+    The contract is intentionally transcript-free and stable: a future durable
+    transcript store can populate the same fields, and ``ConversationDetail`` (turns)
+    composes this rather than redefining it.
+    """
+
+    conversation_id: str
+    user_id: str
+    created_at: float
+    updated_at: float
+    finalized_at: float | None
+    turn_count: int
+    summary_preview: str
 
 
 @dataclass(slots=True)

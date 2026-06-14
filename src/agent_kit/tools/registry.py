@@ -4,9 +4,13 @@ The registry is the per-user authorization seam for tools:
   - ``definitions(user_id)`` returns only the tools that user is allowed to use,
     so the model is never even offered a tool outside the user's allowlist.
   - ``execute(user_id, call)`` re-checks permission before running (defense in
-    depth), applies a per-tool timeout, and turns *every* failure — denied,
-    unknown, raised, timed out — into a ``ToolResult(ok=False)`` observation
-    rather than raising. Tool errors are observations, not exceptions (SPEC §5).
+    depth), applies per-tool policy (rate limit + timeout, SPEC §8 / M10), and
+    turns *every* failure — denied, rate-limited, unknown, raised, timed out — into
+    a ``ToolResult(ok=False)`` observation rather than raising. Tool errors are
+    observations, not exceptions (SPEC §5).
+
+Per-tool policy (``ToolPolicy``, keyed by tool name) overrides the global timeout
+and adds an optional per-user rate limit; unset fields fall back to the defaults.
 
 The full observation text is fed back to the model; ``ToolResult.content`` shown
 in the UI trace is truncated.
@@ -19,8 +23,10 @@ from dataclasses import dataclass
 
 from llm_kit import ToolCall, ToolDefinition
 
+from agent_kit.config import ToolPolicy
 from agent_kit.stores.base import PermissionStore
 from agent_kit.tools.base import Tool
+from agent_kit.tools.ratelimit import ToolRateLimiter
 
 _DISPLAY_TRUNCATE = 500
 
@@ -48,10 +54,13 @@ class ToolRegistry:
         permissions: PermissionStore,
         *,
         per_tool_timeout_s: float = 30.0,
+        policies: dict[str, ToolPolicy] | None = None,
     ) -> None:
         self._tools = {t.name: t for t in tools}
         self._permissions = permissions
         self._timeout = per_tool_timeout_s
+        self._policies = policies or {}
+        self._ratelimiter = ToolRateLimiter()
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -70,11 +79,23 @@ class ToolRegistry:
         if tool is None:
             return self._failure(call, f"unknown tool {call.name!r}")
 
+        policy = self._policies.get(call.name)
+        if policy is not None and policy.rate_limit_per_minute is not None:
+            if not self._ratelimiter.try_acquire(
+                user_id, call.name, policy.rate_limit_per_minute
+            ):
+                return self._failure(
+                    call,
+                    f"tool {call.name!r} rate limit exceeded "
+                    f"({policy.rate_limit_per_minute}/min for this user)",
+                )
+
+        timeout = policy.timeout_s if policy and policy.timeout_s else self._timeout
         try:
-            async with asyncio.timeout(self._timeout):
+            async with asyncio.timeout(timeout):
                 content = await tool.handler(user_id, call.arguments)
         except asyncio.TimeoutError:
-            return self._failure(call, f"tool {call.name!r} timed out after {self._timeout}s")
+            return self._failure(call, f"tool {call.name!r} timed out after {timeout}s")
         except Exception as exc:  # tool errors are observations, never crashes
             return self._failure(call, f"tool {call.name!r} failed: {exc}")
 

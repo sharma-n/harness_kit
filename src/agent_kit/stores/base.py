@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from agent_kit.stores.types import (
+    ConversationMeta,
     MemoryHit,
     MemoryPoint,
     SessionState,
@@ -49,6 +50,12 @@ class SessionStore(Protocol):
     async def mark_finalized(self, conversation_id: str) -> None:
         """Record that a conversation has been finalized (episodic point written),
         so it is not re-finalized until new activity clears the mark.
+        """
+        ...
+
+    async def list(self, user_id: str) -> list[ConversationMeta]:
+        """All conversations owned by ``user_id``, metadata only (no transcripts),
+        newest-first. User-scoped: never returns another user's conversations.
         """
         ...
 

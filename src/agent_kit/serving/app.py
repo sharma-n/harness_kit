@@ -30,7 +30,7 @@ from fastapi.responses import StreamingResponse
 from agent_kit.config import AgentKitConfig
 from agent_kit.errors import UnauthorizedError
 from agent_kit.service import AgentService
-from agent_kit.serving.wire import encode_event
+from agent_kit.serving.wire import encode_conversation, encode_event
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,23 @@ def create_app(service: AgentService) -> FastAPI:
     async def metrics() -> dict[str, str]:
         # Placeholder; observability lands in a later milestone (SPEC §13).
         return {"status": "not_implemented"}
+
+    @app.get("/conversations")
+    async def list_conversations(
+        user_id: str = Query(...),
+        status: str | None = Query(None),  # "active" | "finalized"
+        limit: int | None = Query(None),
+    ) -> dict:
+        # ``user_id`` from the query param mirrors the auth-stub posture of ``/sse``;
+        # a real deployment resolves it from a verified token (see module docstring).
+        metas = await service.stores.session.list(user_id)
+        if status == "active":
+            metas = [m for m in metas if m.finalized_at is None]
+        elif status == "finalized":
+            metas = [m for m in metas if m.finalized_at is not None]
+        if limit is not None:
+            metas = metas[:limit]
+        return {"conversations": [encode_conversation(m) for m in metas]}
 
     @app.websocket("/ws/{conversation_id}")
     async def ws(websocket: WebSocket, conversation_id: str) -> None:

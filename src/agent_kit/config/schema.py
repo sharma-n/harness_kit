@@ -179,10 +179,26 @@ class McpConfig:
 
 
 @dataclass(slots=True)
+class ToolPolicy:
+    """Per-tool execution overrides (SPEC §8 / M10).
+
+    Unset fields fall back to the global defaults: ``timeout_s`` to
+    ``AgentConfig.per_tool_timeout_s``, ``rate_limit_per_minute`` to unlimited.
+    Lets a deployment run a heterogeneous tool suite — fast local tools on a tight
+    timeout, slow external APIs on a generous one, high-value tools rate-limited.
+    """
+
+    timeout_s: float | None = None
+    rate_limit_per_minute: int | None = None
+
+
+@dataclass(slots=True)
 class ToolsConfig:
-    """Global fallback allowlist for users with no per-user grant in the store."""
+    """Global fallback allowlist for users with no per-user grant in the store,
+    plus optional per-tool execution policy (keyed by tool name)."""
 
     default_allowed: list[str] = field(default_factory=list)
+    definitions: dict[str, ToolPolicy] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

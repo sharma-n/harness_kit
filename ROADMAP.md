@@ -37,6 +37,23 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
   optional query-rewrite gated by config.
 - Golden test of the §6.6 worked example + budgeter tier-eviction tests.
 
+### ✅ M5 — Tools / MCP
+- `ToolRegistry` (user-scoped definitions + execute, per-tool timeout, truncation),
+  native factual tools `remember_fact` / `forget_fact` / `list_facts` and episodic
+  `recall`, loop integration, safety rails.
+- Real MCP client (`tools/mcp.py`): operators bring their own MCP servers
+  (stdio / streamable-HTTP / SSE). `MCPServerClient` connects + discovers; `MCPManager`
+  aggregates across servers, **best-effort** (a server that fails to connect within
+  `mcp.startup_timeout_s` is logged and skipped). Discovered tools are wrapped as plain
+  `Tool`s and registered into the existing registry, namespaced `{server}__{tool}`
+  (double underscore — provider-safe + collision-safe vs single `_`). Connection
+  lifecycle runs in `AgentService.astart()` / `aclose()`, driven from the serving
+  lifespan. Permissions stay per-user: discovered tools are unreachable until
+  allowlisted, with an opt-in per-server `auto_allow` that folds a trusted server's
+  tools into the default allowlist (`PermissionStore.extend_default_allowed`).
+- Per-turn tool-subset selection (§6.3) is intentionally **not** built yet — it is a
+  scaling guard, not a missing feature (see Nice to haves).
+
 ### ✅ M6 — Memory write paths
 - Read paths (episodic retrieve, factual get) on the hot path.
 - Factual write paths: `FactualMemory.extract` / `remember`; the loop **enqueues**
@@ -68,26 +85,33 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
   both tool selection and execution. (SPEC treated this as §user_id filtering; we
   made it a first-class, tested invariant from day one.)
 
----
+### ✅ M10 — Per-tool configuration
+- Per-tool execution policy (`ToolPolicy`, keyed by tool name) under
+  `tools.definitions` in config: **per-tool timeout override** (falls back to
+  `agent.per_tool_timeout_s`) + **per-user rate limit** (`rate_limit_per_minute`).
+  `ToolRegistry.execute()` applies both; a timed-out or rate-limited call becomes a
+  `ToolResult(ok=False)` observation (tool errors are observations, SPEC §5) — no
+  loop change, no new exceptions. Config parses with no loader change (`_coerce`
+  already handles `dict[str, ToolPolicy]`).
+- Rate limiting is a **simple in-process** token bucket (`tools/ratelimit.py`),
+  per-`(user_id, tool)`, **reject-on-exceed** (non-blocking, so it never stalls
+  time-to-first-token). Mirrors `llm_kit`'s own in-process `TokenBucket` posture;
+  documented multi-worker caveat (effective ceiling ≈ workers × the configured rate).
+  A shared-store (Redis) backing is a later scaling step, not needed now.
+- **Deferred** (need a human-in-the-loop pause / auth subsystem not present yet):
+  approval gates ("requires user approval") and auth requirements.
 
-## In progress / scaffolded
-
-### 🟡 M5 — Tools / MCP
-- ✅ `ToolRegistry` (user-scoped definitions + execute, timeout, truncation),
-  native factual tools `remember_fact` / `forget_fact` / `list_facts` and episodic
-  `recall`, loop integration, safety rails.
-- ✅ Real MCP client (`tools/mcp.py`): operators bring their own MCP servers
-  (stdio / streamable-HTTP / SSE). `MCPServerClient` connects + discovers; `MCPManager`
-  aggregates across servers, **best-effort** (a server that fails to connect within
-  `mcp.startup_timeout_s` is logged and skipped). Discovered tools are wrapped as plain
-  `Tool`s and registered into the existing registry, namespaced `{server}__{tool}`
-  (double underscore — provider-safe + collision-safe vs single `_`). Connection
-  lifecycle runs in `AgentService.astart()` / `aclose()`, driven from the serving
-  lifespan. Permissions stay per-user: discovered tools are unreachable until
-  allowlisted, with an opt-in per-server `auto_allow` that folds a trusted server's
-  tools into the default allowlist (`PermissionStore.extend_default_allowed`).
-- ⬜ Curated/relevant tool-subset selection per turn (§6.3) to avoid sending 100
-  tools every iteration.
+### ✅ M11 — Conversation listing & metadata API
+- `GET /conversations?user_id=...` → `{conversations: [...]}` of transcript-free
+  `ConversationMeta` (`id, user_id, created_at, updated_at, finalized_at, turn_count,
+  summary_preview`), newest-first, user-scoped. Optional `status` (active/finalized)
+  and `limit` filters. Backed by a new `SessionStore.list()` Protocol method
+  (in-memory impl + Redis stub signature); added `created_at` to `SessionState`.
+- **Forward-compatible for durable transcripts:** `SessionStore` is hot, TTL'd state,
+  so it is not the home for full transcripts. The metadata contract is stable and
+  transcript-free, so a future `TranscriptStore` Protocol + a `GET /conversations/{id}`
+  detail route returning a `ConversationDetail` (= `ConversationMeta` + `turns`) drops
+  in without reworking the listing path. Summary preview is sufficient for now.
 
 ---
 
@@ -142,6 +166,59 @@ Plan when we get there:
 - Already near-stateless behind the store Protocols. Scaling out = add workers +
   swap SQLite→Postgres. Maintain the invariant: no module above `stores/` caches
   mutable per-user state in process without a shared-store backing.
+
+---
+
+## Nice to haves
+
+### ⬜ Per-turn tool-subset selection (§6.3) — scaling guard, adoption-gated
+Today the model is offered **every** allowed tool, every iteration. SPEC §6.3 warns
+this degrades at scale — 100 MCP tools per turn burns tokens and hurts selection. But
+it's **latent, not a missing feature**: agent_kit ships 4 native tools and zero
+bundled MCP tools, so the count is whatever an operator wires up. It only bites a
+deployment that connects several fat servers. Hence: build it as an opt-in guard that
+is **inert until tool counts are large**, never an always-on pipeline stage.
+
+The governing constraint is agent_kit's identity — **TTFT/latency**. Selection runs
+*before* the first token, so nothing here may add a synchronous round-trip in front of
+the first LLM call. That rules out an LLM router (two-pass) and reshapes the rest.
+
+Recommended design, in build order:
+- **Threshold gate (floor, build first):** if `len(allowed_tools) <= N` (e.g. 25),
+  send all tools exactly as today — the current 4-tool reality and the golden context
+  test stay untouched. Selection only engages above the threshold.
+- **Embedding-based retrieval (when a many-tool deployment appears):** embed each
+  tool's `name + description` once at `astart()` into a small in-process index; at turn
+  time rank by cosine against the query and take top-N (mirrors episodic retrieval,
+  reuses the `Embedder` Protocol, same `min_score` idea). Keep marginal latency ~zero
+  by **piggybacking on the episodic query embedding** (§6.4 already embeds the
+  augmented user message). Select once per turn and hold the subset for the whole loop.
+- **Progressive disclosure via a meta-tool (escalation if quality still suffers):**
+  expose core/native tools plus a `search_tools(query)` tool; the model pulls in MCP
+  tools on demand. Zero hot-path latency (cost is paid lazily as an extra iteration
+  only when needed) but the biggest behavioral change and hardest to keep deterministic.
+
+Layering: keep `tools/registry.py` answering only "what is this user *allowed*";
+relevance ranking is a context-assembly concern (`agent/context.py` or a small
+`agent/tool_selector.py`), sitting upstream of the budgeter's tier-0.
+
+### ⬜ Episodic refinement: flagged moments within conversations
+**Rationale:** Per-conversation embedding (M6) trades per-turn recall for efficiency.
+But a 50-turn conversation embedded as one blob is searchable but noisy. When the
+agent later retrieves it, it re-reads everything to find one detail.
+
+**Approach (future, when usage data justifies):**
+- At conversation-end embedding, let the model **flag 1–2 key moments** within the
+  conversation (e.g., "User stated their aisle-seat preference" at turn 5; "Booked
+  SFO→JFK flight" at turn 35).
+- Embed the whole conversation as the main point (current behavior), *plus* embed
+  each flagged moment as a sibling point, all tagged with the same `conversation_id`.
+- On retrieval, top-k could surface either the main conversation or a flagged moment,
+  improving recall *within* a conversation without per-turn noise.
+
+**Trade-off:** More embedding API calls and Qdrant points per conversation, but
+cleaner signal than per-turn and finer recall than per-conversation-only. Revisit
+if real usage shows users struggle to find details in older conversations.
 
 ---
 

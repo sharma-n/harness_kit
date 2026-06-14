@@ -107,7 +107,10 @@ class AgentService:
         if extra_tools:
             tools.extend(extra_tools)
         registry = ToolRegistry(
-            tools, stores.permissions, per_tool_timeout_s=cfg.agent.per_tool_timeout_s
+            tools,
+            stores.permissions,
+            per_tool_timeout_s=cfg.agent.per_tool_timeout_s,
+            policies=cfg.tools.definitions,
         )
         # MCP servers are connected lazily in ``astart`` (an async step build() can't
         # await); discovered tools are registered then.

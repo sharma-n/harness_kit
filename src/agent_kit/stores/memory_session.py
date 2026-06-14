@@ -9,7 +9,10 @@ from __future__ import annotations
 import time
 
 from agent_kit.errors import UnauthorizedError
-from agent_kit.stores.types import SessionState, Turn
+from agent_kit.stores.types import ConversationMeta, SessionState, Turn
+
+# How much of the rolling summary to surface as a listing preview (M11).
+_PREVIEW_LEN = 200
 
 
 class InMemorySessionStore:
@@ -62,3 +65,26 @@ class InMemorySessionStore:
         state = self._sessions.get(conversation_id)
         if state is not None:
             state.finalized_at = time.time()
+
+    async def list(self, user_id: str) -> list[ConversationMeta]:
+        now = time.time()
+        metas = [
+            ConversationMeta(
+                conversation_id=conversation_id,
+                user_id=state.user_id,
+                created_at=state.created_at,
+                updated_at=state.updated_at,
+                finalized_at=state.finalized_at,
+                turn_count=len(state.working_buffer),
+                summary_preview=state.rolling_summary[:_PREVIEW_LEN],
+            )
+            for conversation_id, state in self._sessions.items()
+            if state.user_id == user_id
+            # Skip TTL-expired sessions; listing is read-only, so unlike ``load`` it
+            # does not evict them — the next ``load`` (or the idle sweeper) will.
+            and not (
+                self._ttl_s is not None and now - state.updated_at > self._ttl_s
+            )
+        ]
+        metas.sort(key=lambda m: m.updated_at, reverse=True)
+        return metas
