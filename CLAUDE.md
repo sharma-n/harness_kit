@@ -79,6 +79,7 @@ src/agent_kit/
   llm.py       LLM / Embedder Protocols over llm_kit
   tokens.py    estimate_tokens — leaf estimator shared by memory/ rollover + agent/ budgeter
   retry.py     retry_async / store_write — exp backoff + jitter for store-write retries
+  telemetry.py vendor-neutral tracing seam over Langfuse (the only langfuse import) — leaf
   errors.py    AgentKitError hierarchy (reuse llm_kit.LLMError for provider failures)
 examples/      single_turn.py (direct) · ws_client.py (over server)
 tests/         conftest.py (FakeLLM/FakeEmbedder + make_service) + per-layer tests
@@ -168,11 +169,37 @@ config.yaml    one global config; agent_kit sections + nested llm_kit block
   it runs in `AgentService.astart()` (called from the serving lifespan / examples).
   Native tools are wired in `build()`; MCP tools `register()` later in `astart()`.
 
+## Telemetry / tracing (Langfuse)
+
+- **One seam, one import.** `telemetry.py` is the *only* module that imports
+  `langfuse`. It's a leaf (like `tokens.py`/`retry.py`), so any layer may call it
+  without breaking the bottom-up rule. Every call site uses `telemetry.span(...)` /
+  `turn_span(...)` / `SpanHandle`, never a `langfuse` type — so switching to pure OTel
+  (Langfuse v4 *is* OTel underneath) means reimplementing this one file, not
+  re-instrumenting. Optional `telemetry` extra; lazy import inside `configure()`.
+- **Off by default → no-op.** `TelemetryConfig.enabled` defaults false; every helper
+  becomes a null context manager, so the default suite stays offline and the golden
+  context test is untouched. `service.build()` only wraps the LLM/embedder in
+  `TracingLLM`/`TracingEmbedder` when enabled, so `FakeLLM` runs bare in tests.
+- **identity:** `conversation_id` → Langfuse **session**, `user_id` → Langfuse **user**
+  (via `propagate_attributes` in `turn_span`), so a whole conversation groups in the UI.
+- **Span tree:** `turn` (root) → `context.build` (+ the four source reads) → per-iteration
+  `llm.invoke_stream` *generation* (model + token usage → Langfuse prices it, covering
+  M9 cost) → `tool.execute:{name}` (outcome tag: ok/not_permitted/rate_limited/…).
+  Background writes are spanned in `_guard`; they stay in the same trace because
+  `asyncio.create_task` copies the OTel context live at `_enqueue` time. Conversation
+  finalize is its own `conversation_end` root under the same session.
+- **Streaming rule:** the `invoke_stream` wrapper must never buffer — it yields each
+  `TextChunk` straight through (TTFT) and uses `start_observation`/`end()` (not a
+  context manager held across `yield`s, which would shuffle the OTel current-span var).
+- **Traces only for now** — no Prometheus `/metrics` yet (that pillar is the remaining
+  M9 sub-task; the `/metrics` route is still a stub).
+
 ## Running things
 
 ```bash
-uv sync --extra dev --extra mcp     # use --native-tls on this machine
-uv run pytest                       # 72 tests, no network/Docker
+uv sync --extra dev --extra mcp --extra telemetry   # use --native-tls on this machine
+uv run pytest                       # 77 tests, no network/Docker
 OPENAI_API_KEY=... uv run python examples/single_turn.py
 OPENAI_API_KEY=... uv run uvicorn "agent_kit.serving.app:create_app_from_yaml" --factory
 ```

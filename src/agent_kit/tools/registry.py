@@ -27,6 +27,7 @@ from agent_kit.config import ToolPolicy
 from agent_kit.stores.base import PermissionStore
 from agent_kit.tools.base import Tool
 from agent_kit.tools.ratelimit import ToolRateLimiter
+from agent_kit import telemetry
 
 _DISPLAY_TRUNCATE = 500
 
@@ -71,23 +72,43 @@ class ToolRegistry:
         return [t.definition for name, t in self._tools.items() if name in allowed]
 
     async def execute(self, user_id: str, call: ToolCall) -> Execution:
+        with telemetry.span(
+            f"tool.execute:{call.name}",
+            kind="tool",
+            input=call.arguments,
+            call_id=call.id,
+        ) as sp:
+            execution, outcome = await self._run(user_id, call)
+            sp.set_attributes(ok=execution.ok, outcome=outcome)
+            sp.set_output(execution.observation)
+            return execution
+
+    async def _run(self, user_id: str, call: ToolCall) -> tuple[Execution, str]:
+        """Run the tool call and report an outcome tag for the span (the loop only
+        cares about the ``Execution``; the tag distinguishes the failure modes)."""
         allowed = await self._permissions.allowed_tools(user_id)
         if call.name not in allowed:
-            return self._failure(call, f"tool {call.name!r} is not permitted for this user")
+            return (
+                self._failure(call, f"tool {call.name!r} is not permitted for this user"),
+                "not_permitted",
+            )
 
         tool = self._tools.get(call.name)
         if tool is None:
-            return self._failure(call, f"unknown tool {call.name!r}")
+            return self._failure(call, f"unknown tool {call.name!r}"), "unknown_tool"
 
         policy = self._policies.get(call.name)
         if policy is not None and policy.rate_limit_per_minute is not None:
             if not self._ratelimiter.try_acquire(
                 user_id, call.name, policy.rate_limit_per_minute
             ):
-                return self._failure(
-                    call,
-                    f"tool {call.name!r} rate limit exceeded "
-                    f"({policy.rate_limit_per_minute}/min for this user)",
+                return (
+                    self._failure(
+                        call,
+                        f"tool {call.name!r} rate limit exceeded "
+                        f"({policy.rate_limit_per_minute}/min for this user)",
+                    ),
+                    "rate_limited",
                 )
 
         timeout = policy.timeout_s if policy and policy.timeout_s else self._timeout
@@ -95,11 +116,14 @@ class ToolRegistry:
             async with asyncio.timeout(timeout):
                 content = await tool.handler(user_id, call.arguments)
         except asyncio.TimeoutError:
-            return self._failure(call, f"tool {call.name!r} timed out after {timeout}s")
+            return (
+                self._failure(call, f"tool {call.name!r} timed out after {timeout}s"),
+                "timed_out",
+            )
         except Exception as exc:  # tool errors are observations, never crashes
-            return self._failure(call, f"tool {call.name!r} failed: {exc}")
+            return self._failure(call, f"tool {call.name!r} failed: {exc}"), "error"
 
-        return self._success(call, content)
+        return self._success(call, content), "ok"
 
     def _success(self, call: ToolCall, content: str) -> Execution:
         return Execution(

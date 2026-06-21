@@ -106,4 +106,14 @@ def _coerce(annotation: Any, value: Any) -> Any:
                 continue
         return value
 
+    # Scalars: ``${VAR:-default}`` interpolation always yields a string, so coerce it
+    # to the annotated scalar type (``bool("false")`` is truthy — handle bool by value).
+    if isinstance(value, str):
+        if annotation is bool:
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        if annotation is int:
+            return int(value)
+        if annotation is float:
+            return float(value)
+
     return value

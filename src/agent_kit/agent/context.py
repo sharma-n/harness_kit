@@ -29,6 +29,7 @@ from agent_kit.memory.factual import FactualMemory
 from agent_kit.memory.working import WorkingMemory
 from agent_kit.stores.types import MemoryHit, Turn, UserProfile
 from agent_kit.tools.registry import ToolRegistry
+from agent_kit import telemetry
 
 
 @dataclass(slots=True)
@@ -55,46 +56,58 @@ class ContextBuilder:
     async def build(
         self, user_id: str, conversation_id: str, user_message: str
     ) -> AssembledContext:
-        # --- gather the five sources, all scoped to this user ---
-        snapshot = await self.working.load(conversation_id, user_id)
-        profile = await self.factual.get(user_id)
-        hits = await self.episodic.retrieve(user_id, user_message, snapshot.buffer)
-        tools = await self.registry.definitions(user_id)
+        with telemetry.span("context.build") as ctx_span:
+            # --- gather the five sources, all scoped to this user ---
+            with telemetry.span("memory.working.load"):
+                snapshot = await self.working.load(conversation_id, user_id)
+            with telemetry.span("memory.factual.get"):
+                profile = await self.factual.get(user_id)
+            with telemetry.span("memory.episodic.retrieve"):
+                hits = await self.episodic.retrieve(user_id, user_message, snapshot.buffer)
+            with telemetry.span("tools.definitions"):
+                tools = await self.registry.definitions(user_id)
 
-        # --- budget before assembly ---
-        tool_text = " ".join(f"{t.name} {t.description}" for t in tools)
-        budget = self.budgeter.allocate(
-            BudgetInputs(
-                system_fixed=self.agent_cfg.system_prompt,
-                current_message=user_message,
-                tool_text=tool_text,
-                factual_block=_format_factual(profile),
-                buffer=snapshot.buffer,
-                summary=snapshot.summary,
-                episodic=hits,
+            # --- budget before assembly ---
+            tool_text = " ".join(f"{t.name} {t.description}" for t in tools)
+            budget = self.budgeter.allocate(
+                BudgetInputs(
+                    system_fixed=self.agent_cfg.system_prompt,
+                    current_message=user_message,
+                    tool_text=tool_text,
+                    factual_block=_format_factual(profile),
+                    buffer=snapshot.buffer,
+                    summary=snapshot.summary,
+                    episodic=hits,
+                )
             )
-        )
 
-        # --- assemble in §6.2 order ---
-        system_text = self._compose_system(
-            _format_factual(profile),
-            _format_episodic(budget.episodic),
-            budget.summary,
-        )
-        messages: list[Message] = [Message.system(system_text)]
-        messages.extend(_turn_to_message(t) for t in budget.buffer)
-        messages.append(Message.user(user_message))
+            # --- assemble in §6.2 order ---
+            system_text = self._compose_system(
+                _format_factual(profile),
+                _format_episodic(budget.episodic),
+                budget.summary,
+            )
+            messages: list[Message] = [Message.system(system_text)]
+            messages.extend(_turn_to_message(t) for t in budget.buffer)
+            messages.append(Message.user(user_message))
 
-        dropped = len(snapshot.buffer) - len(budget.buffer)
-        return AssembledContext(
-            messages=messages,
-            tools=tools,
-            episodic_hits=len(budget.episodic),
-            buffer_turns=len(budget.buffer),
-            used_tokens=budget.used_tokens,
-            dropped_turns=dropped,
-            rolled_summary=budget.summary,
-        )
+            dropped = len(snapshot.buffer) - len(budget.buffer)
+            ctx_span.set_attributes(
+                episodic_hits=len(budget.episodic),
+                buffer_turns=len(budget.buffer),
+                used_tokens=budget.used_tokens,
+                dropped_turns=dropped,
+                tool_count=len(tools),
+            )
+            return AssembledContext(
+                messages=messages,
+                tools=tools,
+                episodic_hits=len(budget.episodic),
+                buffer_turns=len(budget.buffer),
+                used_tokens=budget.used_tokens,
+                dropped_turns=dropped,
+                rolled_summary=budget.summary,
+            )
 
     def _compose_system(self, factual: str, episodic: str, summary: str) -> str:
         parts = [self.agent_cfg.system_prompt]

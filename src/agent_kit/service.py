@@ -19,8 +19,9 @@ from llm_kit.http.session import build_async_client
 from agent_kit.agent.budgeter import ContextBudgeter
 from agent_kit.agent.context import ContextBuilder
 from agent_kit.agent.loop import Agent
+from agent_kit import telemetry
 from agent_kit.config import AgentKitConfig
-from agent_kit.llm import LLM, Embedder
+from agent_kit.llm import LLM, Embedder, TracingEmbedder, TracingLLM
 from agent_kit.memory.episodic import EpisodicMemory
 from agent_kit.memory.factual import FactualMemory
 from agent_kit.memory.working import WorkingMemory
@@ -35,6 +36,15 @@ from agent_kit.tools.native import (
     remember_fact_tool,
 )
 from agent_kit.tools.registry import ToolRegistry
+
+
+def _as_async(fn):
+    """Adapt a sync cleanup (``telemetry.shutdown``) to the awaited cleanup list."""
+
+    async def _run() -> None:
+        fn()
+
+    return _run
 
 
 @dataclass(slots=True)
@@ -62,6 +72,10 @@ class AgentService:
     ) -> Self:
         """Assemble the service. Inject ``llm``/``embedder`` for tests; otherwise
         the real llm_kit clients are built over one shared HTTP session."""
+        # Configure tracing first so every span/generation below is captured. A no-op
+        # when ``cfg.telemetry.enabled`` is false (the default), so tests are unaffected.
+        telemetry.configure(cfg.telemetry)
+
         shared_client = None
         cleanups = []
         if llm is None or embedder is None:
@@ -78,6 +92,15 @@ class AgentService:
             cleanups.append(real_embedder.aclose)
         if shared_client is not None:
             cleanups.append(shared_client.aclose)
+
+        # Wrap LLM/embedder so every call (hot-path stream, background invoke, embed)
+        # becomes a Langfuse generation under the active span — a single chokepoint that
+        # also catches the memory layer's direct calls. Only when enabled, so the
+        # FakeLLM suite runs the bare client. ``shutdown`` flushes spans on teardown.
+        if telemetry.is_enabled():
+            llm = TracingLLM(llm, model=cfg.llm_kit.llm.model)
+            embedder = TracingEmbedder(embedder, model=cfg.llm_kit.embed.model)
+            cleanups.append(_as_async(telemetry.shutdown))
 
         stores = build_stores(cfg)
         # Map the config's StoreRetryConfig onto the retry leaf's RetryPolicy (kept as

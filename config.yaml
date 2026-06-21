@@ -75,17 +75,29 @@ tools:
     # remember_fact:
     #   rate_limit_per_minute: 30  # cap a high-volume tool per user
 
+# Tracing / observability via Langfuse (OpenTelemetry under the hood). Off by default
+# so the service runs with zero external infra. Credentials are read from the env by
+# the SDK (LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST) — never put keys
+# here. Install with the `telemetry` extra (uv sync --extra telemetry).
+telemetry:
+  enabled: ${LANGFUSE_ENABLED:-false}
+  service_name: agent_kit
+  sample_rate: 1.0
+  environment: ${LANGFUSE_ENVIRONMENT:-}
+  release: ${LANGFUSE_RELEASE:-}
+
 # Nested block handed wholesale to llm_kit's AppConfig.
 llm_kit:
   llm:
-    message_format: openai
-    base_url: ${OPENAI_BASE_URL:-https://api.openai.com}
-    model: ${AGENT_MODEL:-gpt-4o-mini}
-    api_key_env: OPENAI_API_KEY
+    message_format: anthropic
+    base_url: ${LLM_BASE_URL:-https://api.anthropic.com}
+    chat_completions_path: /v1/messages
+    model: ${LLM_MODEL:-claude-haiku-4-5-20251001}
+    api_key_env: ANTHROPIC_API_KEY
     max_tokens: 4096
   embed:
-    base_url: ${OPENAI_BASE_URL:-https://api.openai.com}
-    model: ${EMBED_MODEL:-text-embedding-3-small}
+    base_url: ${EMBED_BASE_URL:-http://127.0.0.1:1234}
+    model: ${EMBED_MODEL:-text-embedding-qwen3-embedding-0.6b}
     api_key_env: OPENAI_API_KEY
   rate_limit:
     max_concurrent_requests: 16

@@ -40,6 +40,7 @@ from agent_kit.memory.factual import FactualMemory
 from agent_kit.memory.working import WorkingMemory
 from agent_kit.stores.types import Turn
 from agent_kit.tools.registry import ToolRegistry
+from agent_kit import telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -67,66 +68,85 @@ class Agent:
     async def run_turn(
         self, user_id: str, conversation_id: str, user_message: str
     ) -> AsyncIterator[AgentEvent]:
-        ctx = await self._context.build(user_id, conversation_id, user_message)
-        messages = list(ctx.messages)
+        # The root span for the whole turn. ``conversation_id`` becomes the Langfuse
+        # session and ``user_id`` the Langfuse user, so every child span (context
+        # build, LLM generations, tool calls) and the background writes enqueued below
+        # — still inside this ``with`` — land in one trace, queryable per conversation.
+        with telemetry.turn_span(
+            "turn",
+            user_id=user_id,
+            conversation_id=conversation_id,
+            input=user_message,
+        ) as turn:
+            ctx = await self._context.build(user_id, conversation_id, user_message)
+            messages = list(ctx.messages)
 
-        usage = TokenUsage()
-        iterations = 0
-        stop_reason = "completed"
-        assistant_texts: list[str] = []
+            usage = TokenUsage()
+            iterations = 0
+            stop_reason = "completed"
+            assistant_texts: list[str] = []
 
-        deadline = (
-            asyncio.get_event_loop().time() + self._cfg.per_turn_budget_s
-            if self._cfg.per_turn_budget_s
-            else None
-        )
-
-        for iterations in range(1, self._cfg.max_iterations + 1):
-            if deadline is not None and asyncio.get_event_loop().time() > deadline:
-                stop_reason = "turn_budget_exceeded"
-                break
-
-            response = None
-            async for event in self._llm.invoke_stream(messages, tools=ctx.tools):
-                if isinstance(event, TextChunk):
-                    if event.text:
-                        yield TextDelta(event.text)
-                elif isinstance(event, StreamEnd):
-                    response = event.response
-
-            if response is None:  # stream produced no terminal — treat as done
-                stop_reason = "no_response"
-                break
-
-            usage = _accumulate(usage, response.usage)
-            if response.text:
-                assistant_texts.append(response.text)
-
-            tool_calls = response.tool_calls
-            if not tool_calls:
-                stop_reason = "completed"
-                break  # the model answered
-
-            # Replay the assistant's tool-call turn, then each observation.
-            messages.append(
-                Message.assistant_tool_calls(tool_calls, text=response.text or None)
+            deadline = (
+                asyncio.get_event_loop().time() + self._cfg.per_turn_budget_s
+                if self._cfg.per_turn_budget_s
+                else None
             )
-            for call in tool_calls:
-                yield ToolCallStarted(call_id=call.id, name=call.name, arguments=call.arguments)
-                execution = await self._registry.execute(user_id, call)
-                yield ToolResult(
-                    call_id=execution.call_id,
-                    name=execution.name,
-                    ok=execution.ok,
-                    content=execution.display,
-                )
-                messages.append(Message.tool_result(call.id, execution.observation))
-        else:
-            # for-loop exhausted without break → hit the iteration cap.
-            stop_reason = "max_iterations"
 
-        await self._persist(user_id, conversation_id, user_message, assistant_texts)
-        yield TurnComplete(usage=usage, iterations=iterations, stop_reason=stop_reason)
+            for iterations in range(1, self._cfg.max_iterations + 1):
+                if deadline is not None and asyncio.get_event_loop().time() > deadline:
+                    stop_reason = "turn_budget_exceeded"
+                    break
+
+                response = None
+                async for event in self._llm.invoke_stream(messages, tools=ctx.tools):
+                    if isinstance(event, TextChunk):
+                        if event.text:
+                            yield TextDelta(event.text)
+                    elif isinstance(event, StreamEnd):
+                        response = event.response
+
+                if response is None:  # stream produced no terminal — treat as done
+                    stop_reason = "no_response"
+                    break
+
+                usage = _accumulate(usage, response.usage)
+                if response.text:
+                    assistant_texts.append(response.text)
+
+                tool_calls = response.tool_calls
+                if not tool_calls:
+                    stop_reason = "completed"
+                    break  # the model answered
+
+                # Replay the assistant's tool-call turn, then each observation.
+                messages.append(
+                    Message.assistant_tool_calls(tool_calls, text=response.text or None)
+                )
+                for call in tool_calls:
+                    yield ToolCallStarted(
+                        call_id=call.id, name=call.name, arguments=call.arguments
+                    )
+                    execution = await self._registry.execute(user_id, call)
+                    yield ToolResult(
+                        call_id=execution.call_id,
+                        name=execution.name,
+                        ok=execution.ok,
+                        content=execution.display,
+                    )
+                    messages.append(Message.tool_result(call.id, execution.observation))
+            else:
+                # for-loop exhausted without break → hit the iteration cap.
+                stop_reason = "max_iterations"
+
+            await self._persist(user_id, conversation_id, user_message, assistant_texts)
+            turn.set_attributes(
+                iterations=iterations,
+                stop_reason=stop_reason,
+                input_tokens=usage.prompt_tokens,
+                output_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+            )
+            yield TurnComplete(usage=usage, iterations=iterations, stop_reason=stop_reason)
 
     async def _persist(
         self,
@@ -174,16 +194,19 @@ class Agent:
         evicts it; ``mark_finalized`` keeps the sweeper from re-embedding it until
         new activity clears the mark.
         """
-        try:
-            snapshot = await self._working.peek(conversation_id, user_id)
-        except UnauthorizedError:
-            return
-        if snapshot is None:
-            return
-        await self._episodic.write_conversation(
-            user_id, conversation_id, snapshot.summary, snapshot.buffer
-        )
-        await self._working.mark_finalized(conversation_id)
+        with telemetry.turn_span(
+            "conversation_end", user_id=user_id, conversation_id=conversation_id
+        ):
+            try:
+                snapshot = await self._working.peek(conversation_id, user_id)
+            except UnauthorizedError:
+                return
+            if snapshot is None:
+                return
+            await self._episodic.write_conversation(
+                user_id, conversation_id, snapshot.summary, snapshot.buffer
+            )
+            await self._working.mark_finalized(conversation_id)
 
     async def sweep_idle(self, idle_finalize_s: float) -> None:
         """Finalize every conversation idle past ``idle_finalize_s``.
@@ -235,9 +258,14 @@ async def _guard(
     upstream LLM/embedder step failed (already retried by llm_kit). Either way it is
     logged once with full context and traceback. ``CancelledError`` is re-raised so
     ``drain``/shutdown cancellation still works.
+
+    The span here nests under the turn's trace: ``asyncio.create_task`` copies the OTel
+    context active at ``_enqueue`` time, so this background write shows up in the same
+    conversation trace even though it runs after ``TurnComplete``.
     """
     try:
-        await coro
+        with telemetry.span(operation, user_id=user_id, conversation_id=conversation_id):
+            await coro
     except asyncio.CancelledError:
         raise
     except Exception:

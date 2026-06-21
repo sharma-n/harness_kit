@@ -18,6 +18,7 @@ redis = ["redis"]
 sqlite = ["sqlalchemy", "aiosqlite"]
 qdrant = ["qdrant-client"]
 mcp = ["mcp"]
+telemetry = ["langfuse"]
 dev = ["pytest", "pytest-asyncio", "httpx"]
 
 [tool.uv.sources]

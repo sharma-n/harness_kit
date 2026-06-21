@@ -139,11 +139,24 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
 - Bulk re-embedding of a knowledge base (when embedder changes or new docs added).
 - Eval runs over conversation logs (accuracy metrics, tool invocation patterns).
 
-### ⬜ M9 — Observability + cost accounting
-- Spans/metrics: turn latency, time-to-first-token, loop iterations, tool latency,
-  retrieval hit rates, per-source token usage. Wire `/metrics` (currently a stub).
-- Cost accounting via `llm_kit`'s `UsageLedger` / `TokenUsage`, aggregated per
-  user/conversation and priced from the per-1M-token config fields.
+### 🟡 M9 — Observability + cost accounting
+- ✅ **Distributed tracing (Langfuse, OpenTelemetry-based).** Vendor-neutral leaf seam
+  `telemetry.py` (the only `langfuse` import); off by default → no-op, so the default
+  suite stays offline. Full span tree per turn: `turn` (root, `conversation_id`→session
+  / `user_id`→user) → `context.build` (+ working/factual/episodic/tools reads) →
+  per-iteration `llm.invoke_stream` *generation* → `tool.execute:{name}` (outcome tag);
+  background extract/rollover spanned in `_guard` (same trace via the OTel context that
+  `asyncio.create_task` copies); `conversation_end` subtree on finalize. `TracingLLM`/
+  `TracingEmbedder` capture every generation as the single chokepoint (also the memory
+  layer's direct calls). New `telemetry` extra; `tests/test_telemetry.py` drives a
+  recording double offline (no-op + stream pass-through + span-tree assertions).
+- ✅ **Cost accounting** rides on the generations: model + `TokenUsage` (input/output/
+  total) are stamped on each, so Langfuse prices per trace/user/conversation from its
+  model tables — no separate `UsageLedger` wiring needed for the common path.
+- ⬜ **Metrics pillar (remaining).** OTel metrics / Prometheus `/metrics` (currently a
+  stub): p99 TTFT, turn latency, loop iterations, tool error + rate-limit rates,
+  retrieval hit rates. Langfuse covers traces, not histograms/counters — this is the
+  operational-monitoring piece still to wire.
 
 ### ⬜ Live / integration testing (NEW — explicitly planned)
 > SPEC §15 says "no live-key integration tests in-repo." That holds **for now**,

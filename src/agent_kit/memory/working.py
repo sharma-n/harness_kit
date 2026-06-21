@@ -19,6 +19,7 @@ from agent_kit.retry import RetryPolicy, store_write
 from agent_kit.stores.base import SessionStore
 from agent_kit.stores.types import SessionState, Turn
 from agent_kit.tokens import Estimator, estimate_tokens
+from agent_kit import telemetry
 
 
 @dataclass(slots=True)
@@ -85,11 +86,12 @@ class WorkingMemory:
         return await self._store.due_for_finalize(idle_s)
 
     async def mark_finalized(self, conversation_id: str) -> None:
-        await store_write(
-            lambda: self._store.mark_finalized(conversation_id),
-            policy=self._store_retry,
-            operation="working.mark_finalized",
-        )
+        with telemetry.span("memory.working.mark_finalized"):
+            await store_write(
+                lambda: self._store.mark_finalized(conversation_id),
+                policy=self._store_retry,
+                operation="working.mark_finalized",
+            )
 
     def needs_rollover(self, buffer: list[Turn]) -> bool:
         """True when the verbatim buffer exceeds its token budget."""

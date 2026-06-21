@@ -202,6 +202,28 @@ class ToolsConfig:
 
 
 @dataclass(slots=True)
+class TelemetryConfig:
+    """Tracing / observability via Langfuse (which is built on OpenTelemetry).
+
+    Off by default so the default test suite stays offline and deterministic. When
+    enabled, credentials are read from the environment (``LANGFUSE_PUBLIC_KEY`` /
+    ``LANGFUSE_SECRET_KEY`` / ``LANGFUSE_HOST``) by the SDK — never from this file.
+
+    Only the leaf ``agent_kit.telemetry`` module imports ``langfuse``; every other
+    layer depends on that seam. Swapping to pure OTel (or another OTLP backend) later
+    means reimplementing that one module, not re-instrumenting the call sites.
+    """
+
+    enabled: bool = False
+    service_name: str = "agent_kit"
+    # Head sampling ratio passed through to the SDK (1.0 = trace every turn).
+    sample_rate: float = 1.0
+    # Optional deployment tags surfaced on every trace.
+    environment: str = ""
+    release: str = ""
+
+
+@dataclass(slots=True)
 class AgentKitConfig:
     """Top-level config. Compose from YAML via ``AgentKitConfig.from_yaml``."""
 
@@ -211,6 +233,7 @@ class AgentKitConfig:
     stores: StoresConfig = field(default_factory=StoresConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     llm_kit: AppConfig = field(default_factory=AppConfig)
 
     @classmethod

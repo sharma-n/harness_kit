@@ -27,6 +27,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
+from agent_kit import telemetry
 from agent_kit.config import AgentKitConfig
 from agent_kit.errors import UnauthorizedError
 from agent_kit.service import AgentService
@@ -114,6 +115,8 @@ def create_app(service: AgentService) -> FastAPI:
                         last_user_id,
                         conversation_id,
                     )
+            # Export this connection's spans now (no-op when telemetry is disabled).
+            telemetry.flush()
 
     @app.get("/sse/{conversation_id}")
     async def sse(
@@ -129,6 +132,9 @@ def create_app(service: AgentService) -> FastAPI:
                     yield _sse_frame(encode_event(event))
             except UnauthorizedError as exc:
                 yield _sse_frame({"type": "error", "error": str(exc)})
+            finally:
+                # One turn per SSE request → export its spans as the stream closes.
+                telemetry.flush()
 
         return StreamingResponse(stream(), media_type="text/event-stream")
 

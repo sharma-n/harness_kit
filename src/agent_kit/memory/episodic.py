@@ -18,6 +18,7 @@ from agent_kit.llm import LLM, Embedder
 from agent_kit.retry import RetryPolicy, store_write
 from agent_kit.stores.base import VectorStore
 from agent_kit.stores.types import MemoryHit, MemoryPoint, Turn
+from agent_kit import telemetry
 
 
 class StandaloneQuery(BaseModel):
@@ -67,28 +68,29 @@ class EpisodicMemory:
         text = self._compose(summary, turns)
         if not text:
             return
-        vector = (await self._embedder.embed_one(text)).vector
-        point = MemoryPoint(
-            # Deterministic per conversation: if a resumed conversation is finalized
-            # again later, the new (fuller) point upserts the old one rather than
-            # accumulating duplicates. conversation_id is globally unique to one user.
-            id=f"conv:{conversation_id}",
-            vector=vector,
-            payload={
-                "user_id": user_id,
-                "conversation_id": conversation_id,
-                "text": text,
-                "kind": "conversation",
-                "ts": time.time(),
-            },
-        )
-        # Retry only the store write; the embed_one above is already retried by
-        # llm_kit, and re-running it on a store fault would waste an embedding call.
-        await store_write(
-            lambda: self._store.add([point]),
-            policy=self._store_retry,
-            operation="episodic.write_conversation",
-        )
+        with telemetry.span("memory.episodic.write_conversation", turns=len(turns)):
+            vector = (await self._embedder.embed_one(text)).vector
+            point = MemoryPoint(
+                # Deterministic per conversation: if a resumed conversation is finalized
+                # again later, the new (fuller) point upserts the old one rather than
+                # accumulating duplicates. conversation_id is globally unique to one user.
+                id=f"conv:{conversation_id}",
+                vector=vector,
+                payload={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "text": text,
+                    "kind": "conversation",
+                    "ts": time.time(),
+                },
+            )
+            # Retry only the store write; the embed_one above is already retried by
+            # llm_kit, and re-running it on a store fault would waste an embedding call.
+            await store_write(
+                lambda: self._store.add([point]),
+                policy=self._store_retry,
+                operation="episodic.write_conversation",
+            )
 
     @staticmethod
     def _compose(summary: str, turns: list[Turn]) -> str:
