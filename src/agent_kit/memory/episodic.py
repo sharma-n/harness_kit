@@ -18,7 +18,7 @@ from agent_kit.llm import LLM, Embedder
 from agent_kit.retry import RetryPolicy, store_write
 from agent_kit.stores.base import VectorStore
 from agent_kit.stores.types import MemoryHit, MemoryPoint, Turn
-from agent_kit import telemetry
+from agent_kit import telemetry, metrics as _metrics
 
 
 class StandaloneQuery(BaseModel):
@@ -49,9 +49,11 @@ class EpisodicMemory:
         """Top-k hits above ``min_score`` for this user, or ``[]`` (inject nothing)."""
         query_text = await self._build_query(user_message, recent_turns)
         vector = (await self._embedder.embed_one(query_text)).vector
-        return await self._store.search(
+        results = await self._store.search(
             user_id, vector, k=self._cfg.top_k, min_score=self._cfg.min_score
         )
+        _metrics.record_retrieval(len(results))
+        return results
 
     async def write_conversation(
         self,

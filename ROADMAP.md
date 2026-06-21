@@ -129,6 +129,28 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
 - `tests/test_stores_real.py`: 17 new contract tests. SQLite + Qdrant always run (no Docker);
   Redis tests skip if port 6379 is unreachable.
 
+### ✅ M9 — Observability + cost accounting
+- **Distributed tracing (Langfuse, OpenTelemetry-based).** Vendor-neutral leaf seam
+  `telemetry.py` (the only `langfuse` import); off by default → no-op, so the default
+  suite stays offline. Full span tree per turn: `turn` (root, `conversation_id`→session
+  / `user_id`→user) → `context.build` (+ working/factual/episodic/tools reads) →
+  per-iteration `llm.invoke_stream` *generation* → `tool.execute:{name}` (outcome tag);
+  background extract/rollover spanned in `_guard` (same trace via the OTel context that
+  `asyncio.create_task` copies); `conversation_end` subtree on finalize. `TracingLLM`/
+  `TracingEmbedder` capture every generation as the single chokepoint (also the memory
+  layer's direct calls). New `telemetry` extra; `tests/test_telemetry.py` drives a
+  recording double offline (no-op + stream pass-through + span-tree assertions).
+- **Cost accounting** rides on the generations: model + `TokenUsage` (input/output/
+  total) are stamped on each, so Langfuse prices per trace/user/conversation from its
+  model tables — no separate `UsageLedger` wiring needed for the common path.
+- **Metrics pillar.** Prometheus `/metrics` via `prometheus_client` (optional `metrics`
+  extra). Five instruments: `agent_kit_ttft_seconds` (Histogram), `agent_kit_turn_latency_seconds`
+  (Histogram), `agent_kit_turn_iterations` (Histogram), `agent_kit_tool_calls_total`
+  (Counter, labels `tool`+`outcome`), `agent_kit_retrieval_hits` (Histogram). Same seam
+  pattern as `telemetry.py`: single `metrics.py` leaf, no-op by default
+  (`MetricsConfig.enabled=false`), `_set_instruments_for_test` for offline tests.
+  `/metrics` returns 501 JSON when disabled, Prometheus text format when enabled.
+
 ---
 
 ## Not started
@@ -147,25 +169,6 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
     relevance (new context ranks first) and keeping vector store scalable.
 - Bulk re-embedding of a knowledge base (when embedder changes or new docs added).
 - Eval runs over conversation logs (accuracy metrics, tool invocation patterns).
-
-### 🟡 M9 — Observability + cost accounting
-- ✅ **Distributed tracing (Langfuse, OpenTelemetry-based).** Vendor-neutral leaf seam
-  `telemetry.py` (the only `langfuse` import); off by default → no-op, so the default
-  suite stays offline. Full span tree per turn: `turn` (root, `conversation_id`→session
-  / `user_id`→user) → `context.build` (+ working/factual/episodic/tools reads) →
-  per-iteration `llm.invoke_stream` *generation* → `tool.execute:{name}` (outcome tag);
-  background extract/rollover spanned in `_guard` (same trace via the OTel context that
-  `asyncio.create_task` copies); `conversation_end` subtree on finalize. `TracingLLM`/
-  `TracingEmbedder` capture every generation as the single chokepoint (also the memory
-  layer's direct calls). New `telemetry` extra; `tests/test_telemetry.py` drives a
-  recording double offline (no-op + stream pass-through + span-tree assertions).
-- ✅ **Cost accounting** rides on the generations: model + `TokenUsage` (input/output/
-  total) are stamped on each, so Langfuse prices per trace/user/conversation from its
-  model tables — no separate `UsageLedger` wiring needed for the common path.
-- ⬜ **Metrics pillar (remaining).** OTel metrics / Prometheus `/metrics` (currently a
-  stub): p99 TTFT, turn latency, loop iterations, tool error + rate-limit rates,
-  retrieval hit rates. Langfuse covers traces, not histograms/counters — this is the
-  operational-monitoring piece still to wire.
 
 ### ⬜ Live / integration testing (NEW — explicitly planned)
 > SPEC §15 says "no live-key integration tests in-repo." That holds **for now**,

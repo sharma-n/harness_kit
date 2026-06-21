@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 
 from llm_kit import Message, StreamEnd, TextChunk
@@ -40,7 +41,7 @@ from agent_kit.memory.factual import FactualMemory
 from agent_kit.memory.working import WorkingMemory
 from agent_kit.stores.types import Turn
 from agent_kit.tools.registry import ToolRegistry
-from agent_kit import telemetry
+from agent_kit import telemetry, metrics as _metrics
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,8 @@ class Agent:
     async def run_turn(
         self, user_id: str, conversation_id: str, user_message: str
     ) -> AsyncIterator[AgentEvent]:
+        _t0 = time.monotonic()
+        _ttft_recorded = False
         # The root span for the whole turn. ``conversation_id`` becomes the Langfuse
         # session and ``user_id`` the Langfuse user, so every child span (context
         # build, LLM generations, tool calls) and the background writes enqueued below
@@ -101,6 +104,9 @@ class Agent:
                 async for event in self._llm.invoke_stream(messages, tools=ctx.tools):
                     if isinstance(event, TextChunk):
                         if event.text:
+                            if not _ttft_recorded:
+                                _metrics.record_ttft(time.monotonic() - _t0)
+                                _ttft_recorded = True
                             yield TextDelta(event.text)
                     elif isinstance(event, StreamEnd):
                         response = event.response
@@ -139,6 +145,7 @@ class Agent:
                 stop_reason = "max_iterations"
 
             await self._persist(user_id, conversation_id, user_message, assistant_texts)
+            _metrics.record_turn(time.monotonic() - _t0, iterations)
             turn.set_attributes(
                 iterations=iterations,
                 stop_reason=stop_reason,

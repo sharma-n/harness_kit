@@ -222,6 +222,20 @@ class ToolsConfig:
 
 
 @dataclass(slots=True)
+class MetricsConfig:
+    """Prometheus metrics via ``prometheus_client``.
+
+    Off by default so the default test suite stays offline and deterministic.
+    When enabled, ``GET /metrics`` returns Prometheus text format.
+
+    Only the leaf ``agent_kit.metrics`` module imports ``prometheus_client``;
+    every other layer calls thin record functions on that seam.
+    """
+
+    enabled: bool = False
+
+
+@dataclass(slots=True)
 class TelemetryConfig:
     """Tracing / observability via Langfuse (which is built on OpenTelemetry).
 
@@ -254,6 +268,7 @@ class AgentKitConfig:
     mcp: McpConfig = field(default_factory=McpConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
+    metrics: MetricsConfig = field(default_factory=MetricsConfig)
     llm_kit: AppConfig = field(default_factory=AppConfig)
 
     @classmethod

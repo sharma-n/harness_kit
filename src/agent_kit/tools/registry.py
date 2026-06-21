@@ -27,7 +27,7 @@ from agent_kit.config import ToolPolicy
 from agent_kit.stores.base import PermissionStore
 from agent_kit.tools.base import Tool
 from agent_kit.tools.ratelimit import ToolRateLimiter
-from agent_kit import telemetry
+from agent_kit import telemetry, metrics as _metrics
 
 _DISPLAY_TRUNCATE = 500
 
@@ -81,6 +81,7 @@ class ToolRegistry:
             execution, outcome = await self._run(user_id, call)
             sp.set_attributes(ok=execution.ok, outcome=outcome)
             sp.set_output(execution.observation)
+            _metrics.record_tool_call(call.name, outcome)
             return execution
 
     async def _run(self, user_id: str, call: ToolCall) -> tuple[Execution, str]:

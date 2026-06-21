@@ -19,7 +19,7 @@ from llm_kit.http.session import build_async_client
 from agent_kit.agent.budgeter import ContextBudgeter
 from agent_kit.agent.context import ContextBuilder
 from agent_kit.agent.loop import Agent
-from agent_kit import telemetry
+from agent_kit import telemetry, metrics as _metrics
 from agent_kit.config import AgentKitConfig
 from agent_kit.llm import LLM, Embedder, TracingEmbedder, TracingLLM
 from agent_kit.memory.episodic import EpisodicMemory
@@ -72,9 +72,10 @@ class AgentService:
     ) -> Self:
         """Assemble the service. Inject ``llm``/``embedder`` for tests; otherwise
         the real llm_kit clients are built over one shared HTTP session."""
-        # Configure tracing first so every span/generation below is captured. A no-op
-        # when ``cfg.telemetry.enabled`` is false (the default), so tests are unaffected.
+        # Configure tracing + metrics first so every span/record below is captured. Both
+        # are no-ops when disabled (the default), so tests are unaffected.
         telemetry.configure(cfg.telemetry)
+        _metrics.configure(cfg.metrics)
 
         shared_client = None
         cleanups = []

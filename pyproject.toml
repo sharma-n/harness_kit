@@ -19,6 +19,7 @@ sqlite = ["sqlalchemy", "aiosqlite"]
 qdrant = ["qdrant-client"]
 mcp = ["mcp"]
 telemetry = ["langfuse"]
+metrics = ["prometheus-client"]
 dev = ["pytest", "pytest-asyncio", "httpx"]
 
 [tool.uv.sources]

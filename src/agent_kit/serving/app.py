@@ -25,9 +25,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
-from agent_kit import telemetry
+from agent_kit import telemetry, metrics as _metrics
 from agent_kit.config import AgentKitConfig
 from agent_kit.errors import UnauthorizedError
 from agent_kit.service import AgentService
@@ -62,9 +62,15 @@ def create_app(service: AgentService) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/metrics")
-    async def metrics() -> dict[str, str]:
-        # Placeholder; observability lands in a later milestone (SPEC §13).
-        return {"status": "not_implemented"}
+    async def prometheus_metrics() -> Response:
+        body, content_type = _metrics.metrics_output()
+        if not body:
+            return Response(
+                content='{"status":"not_implemented"}',
+                media_type="application/json",
+                status_code=501,
+            )
+        return Response(content=body, media_type=content_type)
 
     @app.get("/conversations")
     async def list_conversations(
