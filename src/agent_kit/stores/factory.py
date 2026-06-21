@@ -68,7 +68,14 @@ def _build_vectors(cfg: AgentKitConfig) -> VectorStore:
     if backend is StoreBackend.MEMORY:
         return InMemoryVectorStore()
     if backend is StoreBackend.QDRANT:
-        return QdrantVectorStore(cfg.stores.qdrant.url, cfg.stores.qdrant.collection)
+        qcfg = cfg.stores.qdrant
+        return QdrantVectorStore(
+            mode=qcfg.mode,
+            path=qcfg.path,
+            url=qcfg.url,
+            collection=qcfg.collection,
+            vector_size=qcfg.vector_size,
+        )
     raise ValueError(f"unsupported vector backend: {backend}")
 
 

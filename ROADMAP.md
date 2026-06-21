@@ -113,16 +113,25 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
   detail route returning a `ConversationDetail` (= `ConversationMeta` + `turns`) drops
   in without reworking the listing path. Summary preview is sufficient for now.
 
+### ✅ Real store backends (behind existing Protocols)
+- **Redis `SessionStore`** (SPEC §9.1): JSON blob at `session:{conv_id}` with idle-reset
+  `EXPIRE`; two side-index ZSETs (`user:{uid}:convs` for listing, `sessions:pending_finalize`
+  for idle sweeper) avoid full-key SCAN. `redis.asyncio` client.
+- **SQLite `ProfileStore` + `PermissionStore`** (§9.2): SQLAlchemy Core + aiosqlite;
+  Postgres = connection-string swap, no code change. Default permission fallback stored as
+  `user_id='__default__'` sentinel row.
+- **Qdrant `VectorStore`** (§9.3): `AsyncQdrantClient` with three modes: `memory` (in-process,
+  no Docker), `file` (local persistence), `host` (remote). Always `user_id`-filtered via
+  `FieldCondition`. String point IDs mapped to deterministic UUID5 (stored as `_ak_id` in
+  payload, recovered on retrieval). `QdrantConfig` extended with `mode`, `path`, `vector_size`.
+- `stores/stubs.py` replaced by a thin re-export shim; real adapters live in
+  `redis_session.py`, `sqlite_profile.py`, `sqlite_permissions.py`, `qdrant_vectors.py`.
+- `tests/test_stores_real.py`: 17 new contract tests. SQLite + Qdrant always run (no Docker);
+  Redis tests skip if port 6379 is unreachable.
+
 ---
 
 ## Not started
-
-### ⬜ Real store backends (behind existing Protocols)
-- Redis `SessionStore` (SPEC §9.1: hash per `session:{conversation_id}`, idle TTL).
-- SQLite `ProfileStore` + `PermissionStore` via SQLAlchemy + aiosqlite (§9.2;
-  Postgres = connection-string change).
-- Qdrant `VectorStore` (§9.3: collection, always `user_id`-filtered).
-- Stubs exist in `stores/stubs.py`; the same contract tests should run against them.
 
 ### ⬜ M8 — Offline jobs (`llm_kit` batch engine)
 - Nightly memory consolidation:

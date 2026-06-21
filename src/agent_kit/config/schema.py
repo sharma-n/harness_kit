@@ -144,8 +144,11 @@ class SqliteConfig:
 
 @dataclass(slots=True)
 class QdrantConfig:
-    url: str = "http://localhost:6333"
+    mode: str = "host"  # "memory" | "file" | "host"
+    path: str = "qdrant_data"  # used when mode="file"
+    url: str = "http://localhost:6333"  # used when mode="host"
     collection: str = "episodic_memory"
+    vector_size: int = 1536  # must match the embedder's output dimension
 
 
 @dataclass(slots=True)

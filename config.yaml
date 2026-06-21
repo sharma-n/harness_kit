@@ -50,8 +50,11 @@ stores:
   sqlite:
     url: ${SQLITE_URL:-sqlite+aiosqlite:///agent_kit.db}
   qdrant:
+    mode: ${QDRANT_MODE:-host}   # memory | file | host
+    path: ${QDRANT_PATH:-qdrant_data}
     url: ${QDRANT_URL:-http://localhost:6333}
     collection: episodic_memory
+    vector_size: 1536            # must match the embedder's output dimension
 
 mcp:
   # Bring your own MCP servers. Discovered tools are namespaced `{server}__{tool}`.
