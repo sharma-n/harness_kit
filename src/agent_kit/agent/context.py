@@ -18,6 +18,7 @@ test.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from llm_kit import Message, ToolDefinition
@@ -52,6 +53,7 @@ class ContextBuilder:
     factual: FactualMemory
     registry: ToolRegistry
     budgeter: ContextBudgeter
+    system_prompt_fn: Callable[[str, str], Awaitable[str]] | None = None
 
     async def build(
         self, user_id: str, conversation_id: str, user_message: str
@@ -67,11 +69,22 @@ class ContextBuilder:
             with telemetry.span("tools.definitions"):
                 tools = await self.registry.definitions(user_id)
 
+            dynamic_text = (
+                await self.system_prompt_fn(user_id, conversation_id)
+                if self.system_prompt_fn
+                else ""
+            )
+
             # --- budget before assembly ---
             tool_text = " ".join(f"{t.name} {t.description}" for t in tools)
+            system_fixed = (
+                self.agent_cfg.system_prompt + "\n\n" + dynamic_text
+                if dynamic_text
+                else self.agent_cfg.system_prompt
+            )
             budget = self.budgeter.allocate(
                 BudgetInputs(
-                    system_fixed=self.agent_cfg.system_prompt,
+                    system_fixed=system_fixed,
                     current_message=user_message,
                     tool_text=tool_text,
                     factual_block=_format_factual(profile, self.agent_cfg.factual_block_header),
@@ -83,6 +96,7 @@ class ContextBuilder:
 
             # --- assemble in §6.2 order ---
             system_text = self._compose_system(
+                dynamic_text,
                 _format_factual(profile, self.agent_cfg.factual_block_header),
                 _format_episodic(budget.episodic, self.agent_cfg.episodic_block_header),
                 budget.summary,
@@ -109,8 +123,10 @@ class ContextBuilder:
                 rolled_summary=budget.summary,
             )
 
-    def _compose_system(self, factual: str, episodic: str, summary: str) -> str:
+    def _compose_system(self, dynamic: str, factual: str, episodic: str, summary: str) -> str:
         parts = [self.agent_cfg.system_prompt]
+        if dynamic:
+            parts.append(dynamic)
         if factual:
             parts.append(factual)
         if episodic:

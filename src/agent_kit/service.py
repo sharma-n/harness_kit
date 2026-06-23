@@ -10,6 +10,7 @@ depends only on the ``LLM`` / ``Embedder`` Protocols and is testable with fakes.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Self
 
@@ -69,6 +70,7 @@ class AgentService:
         embedder: Embedder | None = None,
         extra_tools: list[Tool] | None = None,
         mcp_clients: list[McpClient] | None = None,
+        system_prompt_fn: Callable[[str, str], Awaitable[str]] | None = None,
     ) -> Self:
         """Assemble the service. Inject ``llm``/``embedder`` for tests; otherwise
         the real llm_kit clients are built over one shared HTTP session."""
@@ -151,6 +153,7 @@ class AgentService:
             factual=factual,
             registry=registry,
             budgeter=ContextBudgeter(cfg.context),
+            system_prompt_fn=system_prompt_fn,
         )
         agent = Agent(llm, builder, registry, working, episodic, factual, cfg.agent)
 

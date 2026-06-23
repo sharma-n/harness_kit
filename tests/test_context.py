@@ -112,6 +112,31 @@ async def test_assembly_omits_empty_blocks():
     assert [m.role for m in ctx.messages] == [Role.SYSTEM, Role.USER]
 
 
+async def test_system_prompt_fn_injected():
+    """Dynamic text from system_prompt_fn appears after the base prompt, before factual."""
+
+    async def inject(user_id: str, conversation_id: str) -> str:
+        return f"Today is 2099-01-01. User={user_id}."
+
+    profile = UserProfile(user_id="u", facts={"name": "Sam"})
+    builder = ContextBuilder(
+        agent_cfg=AgentConfig(system_prompt="Base."),
+        working=_StubWorking(WorkingSnapshot(buffer=[], summary="")),
+        episodic=_StubEpisodic([]),
+        factual=_StubFactual(profile),
+        registry=_StubRegistry([]),
+        budgeter=ContextBudgeter(ContextConfig()),
+        system_prompt_fn=inject,
+    )
+    ctx = await builder.build("u", "c1", "hello")
+    system = ctx.messages[0].text
+    assert system == (
+        "Base.\n\n"
+        "Today is 2099-01-01. User=u.\n\n"
+        "What you know about this user:\n- name: Sam"
+    )
+
+
 # --------------------------------------------------------------- budgeter tiers
 
 
