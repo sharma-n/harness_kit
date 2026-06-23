@@ -24,7 +24,12 @@ import json
 import time
 from typing import Any
 
-import redis.asyncio as aioredis
+try:
+    import redis.asyncio as aioredis
+    _REDIS_AVAILABLE = True
+except ImportError:
+    _REDIS_AVAILABLE = False
+
 from llm_kit import ToolCall
 
 from agent_kit.errors import UnauthorizedError
@@ -102,6 +107,10 @@ class RedisSessionStore:
     """SPEC §9.1 — Redis-backed session store with idle-TTL eviction."""
 
     def __init__(self, url: str, ttl_s: int | None = None) -> None:
+        if not _REDIS_AVAILABLE:
+            raise ImportError(
+                "redis backend requires the 'redis' extra: uv sync --extra redis"
+            )
         self._client: aioredis.Redis = aioredis.from_url(url, decode_responses=True)
         self._ttl_s = ttl_s
 

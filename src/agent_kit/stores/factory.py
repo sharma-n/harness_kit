@@ -20,12 +20,6 @@ from agent_kit.stores.memory_permissions import InMemoryPermissionStore
 from agent_kit.stores.memory_profile import InMemoryProfileStore
 from agent_kit.stores.memory_session import InMemorySessionStore
 from agent_kit.stores.memory_vectors import InMemoryVectorStore
-from agent_kit.stores.stubs import (
-    QdrantVectorStore,
-    RedisSessionStore,
-    SqlitePermissionStore,
-    SqliteProfileStore,
-)
 
 
 @dataclass(slots=True)
@@ -50,6 +44,7 @@ def _build_session(cfg: AgentKitConfig) -> SessionStore:
     if backend is StoreBackend.MEMORY:
         return InMemorySessionStore(ttl_s=cfg.memory.working.ttl_s)
     if backend is StoreBackend.REDIS:
+        from agent_kit.stores.redis_session import RedisSessionStore
         return RedisSessionStore(cfg.stores.redis.url, ttl_s=cfg.memory.working.ttl_s)
     raise ValueError(f"unsupported session backend: {backend}")
 
@@ -59,6 +54,7 @@ def _build_profile(cfg: AgentKitConfig) -> ProfileStore:
     if backend is StoreBackend.MEMORY:
         return InMemoryProfileStore()
     if backend is StoreBackend.SQLITE:
+        from agent_kit.stores.sqlite_profile import SqliteProfileStore
         return SqliteProfileStore(cfg.stores.sqlite.url)
     raise ValueError(f"unsupported profile backend: {backend}")
 
@@ -68,6 +64,7 @@ def _build_vectors(cfg: AgentKitConfig) -> VectorStore:
     if backend is StoreBackend.MEMORY:
         return InMemoryVectorStore()
     if backend is StoreBackend.QDRANT:
+        from agent_kit.stores.qdrant_vectors import QdrantVectorStore
         qcfg = cfg.stores.qdrant
         return QdrantVectorStore(
             mode=qcfg.mode,
@@ -85,5 +82,6 @@ def _build_permissions(cfg: AgentKitConfig) -> PermissionStore:
     if backend is StoreBackend.MEMORY:
         return InMemoryPermissionStore(default_allowed=default)
     if backend is StoreBackend.SQLITE:
+        from agent_kit.stores.sqlite_permissions import SqlitePermissionStore
         return SqlitePermissionStore(cfg.stores.sqlite.url, default)
     raise ValueError(f"unsupported permission backend: {backend}")

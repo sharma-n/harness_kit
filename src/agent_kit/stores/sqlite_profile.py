@@ -16,8 +16,12 @@ import asyncio
 import json
 import time
 
-from sqlalchemy import Column, Float, MetaData, Table, Text, select
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+try:
+    from sqlalchemy import Column, Float, MetaData, Table, Text, select
+    from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+    _SQLALCHEMY_AVAILABLE = True
+except ImportError:
+    _SQLALCHEMY_AVAILABLE = False
 
 from agent_kit.stores.types import UserProfile
 
@@ -26,6 +30,10 @@ class SqliteProfileStore:
     """SPEC §9.2 — user profiles persisted in SQLite (or Postgres via URL swap)."""
 
     def __init__(self, url: str) -> None:
+        if not _SQLALCHEMY_AVAILABLE:
+            raise ImportError(
+                "sqlite backend requires the 'sqlite' extra: uv sync --extra sqlite"
+            )
         self._engine: AsyncEngine = create_async_engine(url, future=True)
         self._metadata = MetaData()
         self._table = Table(

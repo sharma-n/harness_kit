@@ -21,15 +21,19 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import (
-    Distance,
-    FieldCondition,
-    Filter,
-    MatchValue,
-    PointStruct,
-    VectorParams,
-)
+try:
+    from qdrant_client import AsyncQdrantClient
+    from qdrant_client.models import (
+        Distance,
+        FieldCondition,
+        Filter,
+        MatchValue,
+        PointStruct,
+        VectorParams,
+    )
+    _QDRANT_AVAILABLE = True
+except ImportError:
+    _QDRANT_AVAILABLE = False
 
 from agent_kit.stores.types import MemoryHit, MemoryPoint
 
@@ -61,6 +65,10 @@ class QdrantVectorStore:
         collection: str = "episodic_memory",
         vector_size: int = 1536,
     ) -> None:
+        if not _QDRANT_AVAILABLE:
+            raise ImportError(
+                "qdrant backend requires the 'qdrant' extra: uv sync --extra qdrant"
+            )
         self._client = _build_client(mode, path, url)
         self._collection = collection
         self._vector_size = vector_size

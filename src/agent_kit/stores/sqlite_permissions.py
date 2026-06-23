@@ -18,8 +18,12 @@ import asyncio
 import json
 from collections.abc import Iterable
 
-from sqlalchemy import Column, MetaData, Table, Text, select
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+try:
+    from sqlalchemy import Column, MetaData, Table, Text, select
+    from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+    _SQLALCHEMY_AVAILABLE = True
+except ImportError:
+    _SQLALCHEMY_AVAILABLE = False
 
 _DEFAULT_SENTINEL = "__default__"
 
@@ -28,6 +32,10 @@ class SqlitePermissionStore:
     """Per-user tool allowlist persisted in SQLite, default-fallback aware."""
 
     def __init__(self, url: str, default_allowed: Iterable[str] = ()) -> None:
+        if not _SQLALCHEMY_AVAILABLE:
+            raise ImportError(
+                "sqlite backend requires the 'sqlite' extra: uv sync --extra sqlite"
+            )
         self._engine: AsyncEngine = create_async_engine(url, future=True)
         self._default_allowed = set(default_allowed)
         self._metadata = MetaData()
