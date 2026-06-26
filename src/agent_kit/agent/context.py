@@ -19,7 +19,7 @@ test.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from llm_kit import Message, ToolDefinition
 
@@ -31,6 +31,8 @@ from agent_kit.memory.working import WorkingMemory
 from agent_kit.stores.types import MemoryHit, Turn, UserProfile
 from agent_kit.tools.registry import ToolRegistry
 from agent_kit import telemetry
+from agent_kit.skills.manager import SkillManager
+from agent_kit.stores.base import SkillStore
 
 
 @dataclass(slots=True)
@@ -45,7 +47,7 @@ class AssembledContext:
     rolled_summary: str = ""
 
 
-@dataclass(slots=True)
+@dataclass
 class ContextBuilder:
     agent_cfg: AgentConfig
     working: WorkingMemory
@@ -54,6 +56,8 @@ class ContextBuilder:
     registry: ToolRegistry
     budgeter: ContextBudgeter
     system_prompt_fn: Callable[[str, str], Awaitable[str]] | None = None
+    skill_manager: SkillManager | None = None
+    skill_store: SkillStore | None = None
 
     async def build(
         self, user_id: str, conversation_id: str, user_message: str
@@ -75,13 +79,21 @@ class ContextBuilder:
                 else ""
             )
 
+            skills_block = ""
+            if self.skill_manager is not None and self.skill_store is not None:
+                with telemetry.span("skills.metadata"):
+                    allowed = await self.skill_store.allowed_skills(user_id)
+                    skills_block = self.skill_manager.metadata_block(
+                        allowed, self.agent_cfg.skills_block_header
+                    )
+
             # --- budget before assembly ---
             tool_text = " ".join(f"{t.name} {t.description}" for t in tools)
-            system_fixed = (
-                self.agent_cfg.system_prompt + "\n\n" + dynamic_text
-                if dynamic_text
-                else self.agent_cfg.system_prompt
-            )
+            system_fixed = self.agent_cfg.system_prompt
+            if dynamic_text:
+                system_fixed += "\n\n" + dynamic_text
+            if skills_block:
+                system_fixed += "\n\n" + skills_block
             budget = self.budgeter.allocate(
                 BudgetInputs(
                     system_fixed=system_fixed,
@@ -97,6 +109,7 @@ class ContextBuilder:
             # --- assemble in §6.2 order ---
             system_text = self._compose_system(
                 dynamic_text,
+                skills_block,
                 _format_factual(profile, self.agent_cfg.factual_block_header),
                 _format_episodic(budget.episodic, self.agent_cfg.episodic_block_header),
                 budget.summary,
@@ -123,10 +136,14 @@ class ContextBuilder:
                 rolled_summary=budget.summary,
             )
 
-    def _compose_system(self, dynamic: str, factual: str, episodic: str, summary: str) -> str:
+    def _compose_system(
+        self, dynamic: str, skills_block: str, factual: str, episodic: str, summary: str
+    ) -> str:
         parts = [self.agent_cfg.system_prompt]
         if dynamic:
             parts.append(dynamic)
+        if skills_block:
+            parts.append(skills_block)
         if factual:
             parts.append(factual)
         if episodic:

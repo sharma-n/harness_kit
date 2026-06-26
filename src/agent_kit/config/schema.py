@@ -40,6 +40,7 @@ class AgentConfig:
     factual_block_header: str = "What you know about this user:"
     episodic_block_header: str = "Relevant memories from past conversations:"
     summary_block_header: str = "Summary of earlier in this conversation:"
+    skills_block_header: str = "Available skills (use read_skill to load instructions):"
 
 
 @dataclass(slots=True)
@@ -253,6 +254,19 @@ class ToolsConfig:
 
 
 @dataclass(slots=True)
+class SkillsConfig:
+    """Configuration for the agentskills.io file-based skills layer.
+
+    ``paths`` is a list of directories to scan at startup. Each immediate
+    subdirectory containing a ``SKILL.md`` file is loaded as a skill. Paths
+    support ``${VAR}`` interpolation. Skills are globally visible to all users
+    in v1 (the ``SkillStore`` Protocol gates per-user visibility in v2).
+    """
+
+    paths: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class MetricsConfig:
     """Prometheus metrics via ``prometheus_client``.
 
@@ -298,6 +312,7 @@ class AgentKitConfig:
     stores: StoresConfig = field(default_factory=StoresConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    skills: SkillsConfig = field(default_factory=SkillsConfig)
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     llm_kit: AppConfig = field(default_factory=AppConfig)

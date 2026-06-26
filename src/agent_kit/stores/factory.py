@@ -14,11 +14,13 @@ from agent_kit.stores.base import (
     PermissionStore,
     ProfileStore,
     SessionStore,
+    SkillStore,
     VectorStore,
 )
 from agent_kit.stores.memory_permissions import InMemoryPermissionStore
 from agent_kit.stores.memory_profile import InMemoryProfileStore
 from agent_kit.stores.memory_session import InMemorySessionStore
+from agent_kit.stores.memory_skills import InMemorySkillStore
 from agent_kit.stores.memory_vectors import InMemoryVectorStore
 
 
@@ -28,14 +30,19 @@ class Stores:
     profile: ProfileStore
     vectors: VectorStore
     permissions: PermissionStore
+    skills: SkillStore
 
 
-def build_stores(cfg: AgentKitConfig) -> Stores:
+def build_stores(
+    cfg: AgentKitConfig,
+    extra_default_allowed: set[str] | None = None,
+) -> Stores:
     return Stores(
         session=_build_session(cfg),
         profile=_build_profile(cfg),
         vectors=_build_vectors(cfg),
-        permissions=_build_permissions(cfg),
+        permissions=_build_permissions(cfg, extra_default_allowed),
+        skills=_build_skills(),
     )
 
 
@@ -76,12 +83,21 @@ def _build_vectors(cfg: AgentKitConfig) -> VectorStore:
     raise ValueError(f"unsupported vector backend: {backend}")
 
 
-def _build_permissions(cfg: AgentKitConfig) -> PermissionStore:
+def _build_permissions(
+    cfg: AgentKitConfig,
+    extra_default_allowed: set[str] | None = None,
+) -> PermissionStore:
     backend = cfg.stores.permission_backend
     default = set(cfg.tools.default_allowed)
+    if extra_default_allowed:
+        default = default | extra_default_allowed
     if backend is StoreBackend.MEMORY:
         return InMemoryPermissionStore(default_allowed=default)
     if backend is StoreBackend.SQLITE:
         from agent_kit.stores.sqlite_permissions import SqlitePermissionStore
         return SqlitePermissionStore(cfg.stores.sqlite.url, default)
     raise ValueError(f"unsupported permission backend: {backend}")
+
+
+def _build_skills() -> SkillStore:
+    return InMemorySkillStore()

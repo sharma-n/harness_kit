@@ -165,6 +165,50 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
 
 ---
 
+## Done (continued)
+
+### ✅ Skills — File-based capability extensions (agentskills.io format)
+
+**V1 — implemented:**
+- `SKILL.md` parser (`skills/loader.py`): YAML frontmatter (`name`, `description`,
+  optional `allowed-tools`) + Markdown body. Discovery is best-effort — malformed or
+  missing files are logged and skipped (consistent with MCP's startup posture).
+- `SkillManager` (`skills/manager.py`): in-memory index of discovered skills.
+  `metadata_block(allowed, header)` emits a ~50-token "Available skills:" list per
+  visible skill; `read_body(name, allowed)` reads the full body from disk on demand
+  (no body cache — operators can update files without restart).
+- `SkillStore` Protocol (`stores/base.py`) + `InMemorySkillStore`: per-user skill
+  visibility grants. `allowed_skills()` returns `None` → all skills globally visible
+  (v1 default). Built-out now so v2 per-user grants require only a new adapter.
+- `SkillsConfig.paths` in `AgentKitConfig`: directories to scan at startup (sync
+  filesystem I/O in `AgentService.build()`, safe without async).
+- `read_skill(name)` native tool (`tools/skill_tools.py`): agent-driven progressive
+  disclosure. Permission is re-checked at execution time (defense-in-depth).
+  Pre-seeded into `PermissionStore` default allowlist when skills are active.
+- Context assembly: skills block injected into system message as tier-0 (never
+  evicted): `base_prompt → dynamic → skills_block → factual → episodic → summary`.
+- `AgentConfig.skills_block_header` for customization.
+
+**Design decisions:**
+- Skills are files on disk, never in any database. `SkillStore` stores only grant state.
+- `allowed-tools` is parsed but not auto-granted — tool permissions remain in
+  `PermissionStore` (the authorization boundary). Operator must grant explicitly.
+- Script execution (`scripts/` directories) is not supported in v1 — no vetted shell
+  tool exists today. Adding one is a deliberate security decision (sandboxing, approval
+  gates) deferred to a dedicated milestone.
+
+**V2 — deferred (scaffolding built):**
+- `SqliteSkillStore`: per-user skill grants persisted to SQLite. `SkillManager` API is
+  identical in v1 and v2 — only the store adapter changes.
+- Per-user skill grants via `SkillStore.grant(user_id, skills)` / `revoke()` operator API.
+- `SkillPolicy` config block: `auto_grant_tools: bool` — when true, a skill's
+  `allowed-tools` are added to the default `PermissionStore` allowlist at startup
+  (opt-in, mirrors MCP `auto_allow`).
+- Script execution: when a vetted shell tool is added (sandboxing + approval gates),
+  skills' `scripts/` directories become executable by the agent.
+
+---
+
 ## Not started
 
 ### ⬜ M8 — Offline jobs (`llm_kit` batch engine)

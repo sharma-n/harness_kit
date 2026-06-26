@@ -24,6 +24,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import anyio
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 
@@ -131,22 +132,27 @@ def create_app(service: AgentService) -> FastAPI:
                     with contextlib.suppress(Exception):
                         await websocket.send_json({"type": "error", "error": str(exc)})
 
-        await asyncio.gather(_receive(), _run_turns())
-        # Conversation ended → embed it as one episodic point (off the hot path).
-        # Log a finalize failure here rather than let it surface as an unhandled
-        # task error; the idle sweeper is the backstop if this disconnect path fails.
-        if last_user_id is not None:
-            try:
-                await service.agent.end_conversation(last_user_id, conversation_id)
-            except Exception:
-                logger.exception(
-                    "conversation finalize on disconnect failed "
-                    "(user_id=%s conversation_id=%s)",
-                    last_user_id,
-                    conversation_id,
-                )
-        # Export this connection's spans now (no-op when telemetry is disabled).
-        telemetry.flush()
+        try:
+            await asyncio.gather(_receive(), _run_turns())
+        finally:
+            # Conversation ended — embed it as one episodic point. This runs in a
+            # shielded cancel scope so it completes even when the test client (or a
+            # proxy) cancels the ASGI handler immediately after sending the disconnect
+            # frame, before the gather has a chance to process it. The idle sweeper is
+            # the backstop if even this path fails (e.g. abrupt process kill).
+            with anyio.CancelScope(shield=True):
+                if last_user_id is not None:
+                    try:
+                        await service.agent.end_conversation(last_user_id, conversation_id)
+                    except Exception:
+                        logger.exception(
+                            "conversation finalize on disconnect failed "
+                            "(user_id=%s conversation_id=%s)",
+                            last_user_id,
+                            conversation_id,
+                        )
+                # Export this connection's spans now (no-op when telemetry is disabled).
+                telemetry.flush()
 
     @app.get("/sse/{conversation_id}")
     async def sse(

@@ -9,6 +9,7 @@ Multi-user is enforced at this boundary:
   - ``SessionStore.load`` takes ``user_id`` and rejects cross-user access.
   - ``VectorStore.search`` always filters by ``user_id``.
   - ``PermissionStore`` resolves each user's allowed tool set.
+  - ``SkillStore`` resolves each user's visible skill set.
 """
 
 from __future__ import annotations
@@ -102,4 +103,33 @@ class PermissionStore(Protocol):
         """Fold ``names`` into the global default allowlist (the fallback for users
         with no explicit grant). Used at startup for ``auto_allow`` MCP servers.
         """
+        ...
+
+
+@runtime_checkable
+class SkillStore(Protocol):
+    """Per-user skill visibility grants.
+
+    ``allowed_skills()`` returns ``None`` to mean "all skills allowed" — the v1
+    default where every user can see every installed skill. A ``set[str]`` means
+    the user is restricted to exactly those skill names.
+
+    The skill *content* lives on disk as ``SKILL.md`` files; this Protocol only
+    stores grant state (which users may access which skills).
+    """
+
+    async def allowed_skills(self, user_id: str) -> set[str] | None:
+        """Return the user's allowed skill names, or ``None`` for unrestricted."""
+        ...
+
+    async def grant(self, user_id: str, skills: set[str]) -> None:
+        """Add skills to a user's explicit allowlist."""
+        ...
+
+    async def revoke(self, user_id: str, skills: set[str]) -> None:
+        """Remove skills from a user's explicit allowlist."""
+        ...
+
+    async def extend_default_allowed(self, names: set[str]) -> None:
+        """Grow the global default allowlist (for future auto-grant installs)."""
         ...

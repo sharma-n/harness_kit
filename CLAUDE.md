@@ -21,9 +21,10 @@ loop**, plus a serving layer.
 Each layer imports only from layers below it. Do not violate this.
 
 ```
-config → stores → memory → tools → agent → serving
+config → stores → (skills || tools) → agent → serving
 ```
 
+`skills/` and `tools/` sit at the same level — neither imports from the other.
 `service.py` is the composition root (top) that wires everything from config.
 `agent_kit/llm.py` holds thin `LLM` / `Embedder` Protocols over `llm_kit` so every
 layer above depends on the Protocol, not the concrete client — that's what lets the
@@ -65,17 +66,20 @@ the real (Redis/SQLite/Qdrant) adapters drop in behind the identical Protocol.
 ```
 src/agent_kit/
   config/      schema.py (dataclass tree) + loader.py (YAML + ${VAR}; nested llm_kit block)
-  stores/      base.py (4 Protocols) · types.py (records) · memory_*.py (in-memory adapters)
-               · stubs.py (real adapters, NotImplementedError) · factory.py (backend select)
+  stores/      base.py (5 Protocols incl. SkillStore) · types.py (records)
+               · memory_*.py (in-memory adapters) · stubs.py (real adapters, NotImplementedError)
+               · factory.py (backend select; build_stores returns Stores bundle)
   memory/      working.py (buffer + token-budget rollover) · episodic.py (conversation-end
-               embed) · factual.py   (cognition over the stores)
+               embed) · factual.py (cognition over the stores)
+  skills/      loader.py (SKILL.md parser + discover) · manager.py (SkillManager index)
+               · __init__.py (exports)
   tools/       base.py (Tool) · registry.py (user-scoped exec + per-tool policy) · native.py
-               · ratelimit.py (in-process per-user token bucket) · mcp.py (MCPServerClient
-               connect/discover + MCPManager aggregate)
+               · skill_tools.py (read_skill native tool) · ratelimit.py (in-process per-user
+               token bucket) · mcp.py (MCPServerClient connect/discover + MCPManager aggregate)
   agent/       events.py (AgentEvent) · context.py (assembly §6.2) · budgeter.py (tiers §6.5)
                · loop.py (run_turn §5 + end_conversation)
   serving/     wire.py (AgentEvent→frame) · app.py (FastAPI ws + sse)
-  service.py   composition root: config → stores → memory → tools → agent
+  service.py   composition root: config → stores → skills → tools → agent
   llm.py       LLM / Embedder Protocols over llm_kit
   tokens.py    estimate_tokens — leaf estimator shared by memory/ rollover + agent/ budgeter
   retry.py     retry_async / store_write — exp backoff + jitter for store-write retries
@@ -148,6 +152,54 @@ config.yaml    one global config; agent_kit sections + nested llm_kit block
   the store call, not the preceding LLM/embedder step — that's already retried by llm_kit,
   so a transient store fault never re-runs the model. Tunable via `MemoryConfig.store_retry`.
   All background store ops are verified idempotent (except append-only `append_turn`).
+
+## Skills design decisions (agentskills.io format)
+
+Skills are **files on disk**, never in a database. A skill is a directory containing a
+`SKILL.md` file with YAML frontmatter (`name`, `description`, optional `allowed-tools`)
+followed by Markdown instructions. The filesystem is the source of truth; `SkillStore`
+only stores grant metadata (who can see which skills).
+
+- **Progressive disclosure, three stages.**
+  1. *Startup* (`service.build()`): `discover(cfg.skills.paths)` scans configured
+     directories and loads `name` + `description` only — ~50 tokens/skill in the system
+     message. Safe to run synchronously (filesystem I/O, no network).
+  2. *Activation* (agent-driven): the agent calls `read_skill(name)` → full `SKILL.md`
+     body returned as a tool observation. Body is read from disk on each call (no cache)
+     so operators can update files without restarting the service.
+  3. *Reference loading* (on demand): skill instructions can tell the agent to read
+     `references/foo.md` using existing file tools — no special plumbing needed.
+
+- **Context assembly.** The skills block is tier-0 (never evicted by the budgeter) and
+  sits between the dynamic system prompt and the factual block:
+  `base_prompt → dynamic → skills_block → factual → episodic → summary`.
+  `ContextBuilder` receives `skill_manager` and `skill_store` as optional fields (default
+  `None`); when both are absent the output is byte-for-byte identical to pre-skills
+  context, so the golden test is unaffected.
+
+- **`allowed-tools` is parsed, not auto-granted.** The field is stored in
+  `SkillMeta.allowed_tools` for operator inspection. A skill definition never silently
+  expands what a user can execute — `PermissionStore` remains the authorization boundary.
+  Operators who want to grant a skill's tools can call `PermissionStore.grant(...)` explicitly.
+  (V2 will add an opt-in `auto_grant_tools` policy, mirroring MCP's `auto_allow`.)
+
+- **`SkillStore` Protocol: scaffolded for v2 per-user grants.**
+  `allowed_skills(user_id) → None` means all skills are visible (v1 global default);
+  `→ set[str]` means the user is restricted to exactly those names. `SkillManager` methods
+  `metadata_block(allowed, header)` and `read_body(name, allowed)` both accept the allowed
+  set and filter accordingly — no API change when a v2 `SqliteSkillStore` adapter is added.
+
+- **`read_skill` permission seeding.** `read_skill` is a native tool that must be in the
+  `PermissionStore` default allowlist so all users can call it. Seeding is done
+  synchronously in `build_stores(cfg, extra_default_allowed={"read_skill"})` — no async
+  `extend_default_allowed` call needed at startup.
+
+- **Defense-in-depth.** `read_skill`'s handler re-checks `SkillStore.allowed_skills(user_id)`
+  at execution time, mirroring `ToolRegistry.execute()`'s re-check of `PermissionStore`.
+
+- **Script execution is deliberately deferred.** Skills can bundle `scripts/` directories per
+  the agentskills.io spec, but the agent has no shell tool today. Adding one is a separate
+  security decision (sandboxing, approval gates) tracked in ROADMAP.md.
 
 ## llm_kit gotchas (verified against the installed package)
 
@@ -234,7 +286,7 @@ config.yaml    one global config; agent_kit sections + nested llm_kit block
 
 ```bash
 uv sync --extra dev --extra mcp --extra telemetry   # use --native-tls on this machine
-uv run pytest                       # 115 tests, no network/Docker
+uv run pytest                       # 151 tests, no network/Docker
 OPENAI_API_KEY=... uv run python examples/single_turn.py
 OPENAI_API_KEY=... uv run uvicorn "agent_kit.serving.app:create_app_from_yaml" --factory
 ```

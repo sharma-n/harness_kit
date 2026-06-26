@@ -37,6 +37,8 @@ from agent_kit.tools.native import (
     remember_fact_tool,
 )
 from agent_kit.tools.registry import ToolRegistry
+from agent_kit.tools.skill_tools import read_skill_tool
+from agent_kit.skills import SkillManager, discover
 
 
 def _as_async(fn):
@@ -55,6 +57,7 @@ class AgentService:
     agent: Agent
     registry: ToolRegistry
     mcp: MCPManager
+    skill_manager: SkillManager | None = None
     _aclose: object = None  # callable cleanup, set by build()
 
     @classmethod
@@ -105,7 +108,15 @@ class AgentService:
             embedder = TracingEmbedder(embedder, model=cfg.llm_kit.embed.model)
             cleanups.append(_as_async(telemetry.shutdown))
 
-        stores = build_stores(cfg)
+        # Discover skills (sync filesystem I/O — safe in build()).
+        skill_manager: SkillManager | None = None
+        extra_skill_tools: set[str] = set()
+        if cfg.skills.paths:
+            skill_manager = SkillManager(discover(cfg.skills.paths))
+            if skill_manager.list_all():
+                extra_skill_tools.add("read_skill")
+
+        stores = build_stores(cfg, extra_default_allowed=extra_skill_tools or None)
         # Map the config's StoreRetryConfig onto the retry leaf's RetryPolicy (kept as
         # two types so retry.py need not import config). Shared across all three writes.
         store_retry = RetryPolicy(
@@ -130,6 +141,8 @@ class AgentService:
             list_facts_tool(factual),
             recall_tool(episodic),
         ]
+        if skill_manager and skill_manager.list_all():
+            tools.append(read_skill_tool(skill_manager, stores.skills))
         if extra_tools:
             tools.extend(extra_tools)
         registry = ToolRegistry(
@@ -154,6 +167,8 @@ class AgentService:
             registry=registry,
             budgeter=ContextBudgeter(cfg.context),
             system_prompt_fn=system_prompt_fn,
+            skill_manager=skill_manager,
+            skill_store=stores.skills,
         )
         agent = Agent(llm, builder, registry, working, episodic, factual, cfg.agent)
 
@@ -164,7 +179,13 @@ class AgentService:
                 await close()
 
         return cls(
-            cfg=cfg, stores=stores, agent=agent, registry=registry, mcp=mcp, _aclose=_aclose
+            cfg=cfg,
+            stores=stores,
+            agent=agent,
+            registry=registry,
+            mcp=mcp,
+            skill_manager=skill_manager,
+            _aclose=_aclose,
         )
 
     async def astart(self) -> None:
