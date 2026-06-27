@@ -226,22 +226,17 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
 - Bulk re-embedding of a knowledge base (when embedder changes or new docs added).
 - Eval runs over conversation logs (accuracy metrics, tool invocation patterns).
 
-### ⬜ Live / integration testing (NEW — explicitly planned)
-> SPEC §15 says "no live-key integration tests in-repo." That holds **for now**,
-> but real-world testing against a live provider **will** be needed.
-
-Plan when we get there:
-- A separate, **opt-in** test suite (e.g. `tests/integration/`, marked
-  `@pytest.mark.live`, skipped unless a key env var is present) so the default
-  `uv run pytest` stays network-free and deterministic.
-- Smoke-level coverage: a real single turn streams tokens; a real tool round-trip;
-  episodic write→retrieve against a real embedder; provider parity across
-  openai/anthropic/gemini `message_format`.
-- Keep secrets out of the repo (env/CI secrets only); never commit keys or
-  recorded responses containing PII.
-- **Blocked locally** until the httpx/OpenSSL `OPENSSL_Applink` issue on this
-  Windows box is resolved (see CLAUDE.md) — any `httpx.AsyncClient` currently
-  crashes, so the live path can't be exercised here yet.
+### ✅ Live / integration testing
+`tests/integration/` — opt-in suite (skipped unless `LIVE_TESTS_ENABLED=1`).
+Provider-agnostic via `config_live.yaml`; FakeEmbedder used so no embed endpoint
+is needed. Seven coverage areas verified with a real LLM:
+- Streaming event sequence and token usage invariants
+- Tool call round-trip (real LLM calls `remember_fact`, ≥2 iterations)
+- Native memory tools (`list_facts`, `forget_fact`, `recall`)
+- Working memory rollover (small `buffer_token_budget` forces summarization)
+- Episodic memory write plumbing (`end_conversation` → one vector point per conversation)
+- Factual extraction quality (durable facts stored; ephemeral context omitted)
+- Skills (discovery at startup, `read_skill` called, verbatim instructions followed)
 
 ### ⬜ Horizontal scaling (later, per SPEC §12)
 - Already near-stateless behind the store Protocols. Scaling out = add workers +

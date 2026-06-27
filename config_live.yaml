@@ -1,0 +1,43 @@
+agent:
+  max_iterations: 8
+  system_prompt: |
+    You are a helpful assistant with memory of past conversations.
+    Use your memory tools when the user asks to remember or retrieve something.
+
+memory:
+  working:
+    buffer_token_budget: 2048
+    idle_finalize_s: 60
+    ttl_s: 120
+    sweep_interval_s: 60
+  episodic:
+    top_k: 3
+    min_score: 0.3
+  factual:
+    extraction_enabled: true
+
+tools:
+  default_allowed:
+    - remember_fact
+    - forget_fact
+    - list_facts
+    - recall
+
+stores:
+  session_backend: memory
+  profile_backend: memory
+  vector_backend: memory
+  permission_backend: memory
+
+llm_kit:
+  llm:
+    message_format: ${LLM_MESSAGE_FORMAT:-anthropic}
+    base_url: ${LLM_BASE_URL:-https://api.anthropic.com}
+    chat_completions_path: ${LLM_CHAT_PATH:-/v1/messages}
+    model: ${LLM_MODEL:-claude-haiku-4-5-20251001}
+    api_key_env: ${LLM_API_KEY_ENV:-ANTHROPIC_API_KEY}
+    max_tokens: 1024
+  embed:
+    base_url: ${EMBED_BASE_URL:-http://localhost:1234}
+    model: ${EMBED_MODEL:-text-embedding-3-small}
+    api_key_env: ${EMBED_API_KEY_ENV:-OPENAI_API_KEY}

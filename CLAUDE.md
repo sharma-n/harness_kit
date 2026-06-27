@@ -286,20 +286,35 @@ only stores grant metadata (who can see which skills).
 
 ```bash
 uv sync --extra dev --extra mcp --extra telemetry   # use --native-tls on this machine
-uv run pytest                       # 151 tests, no network/Docker
-OPENAI_API_KEY=... uv run python examples/single_turn.py
-OPENAI_API_KEY=... uv run uvicorn "agent_kit.serving.app:create_app_from_yaml" --factory
+uv run pytest                       # unit tests only, no network/Docker
+ANTHROPIC_API_KEY=... uv run python examples/single_turn.py
+ANTHROPIC_API_KEY=... uv run uvicorn "agent_kit.serving.app:create_app_from_yaml" --factory
 ```
 
 Note: `uv` on this Windows box needs `--native-tls` or it fails with a cert error.
 
-### Known environment caveat (live path)
+## Live integration tests
 
-On this machine, instantiating *any* `httpx.AsyncClient` crashes with
-`OPENSSL_Uplink ... no OPENSSL_Applink` — a local httpx/OpenSSL FFI issue,
-independent of agent_kit and llm_kit. It blocks only the **live-network path**; all
-logic is exercised via the `FakeLLM` suite. On a healthy httpx/OpenSSL install the
-examples and server run as documented.
+`tests/integration/` is an opt-in suite that exercises real LLM calls.
+Skipped by default; enabled by setting `LIVE_TESTS_ENABLED=1`.
+
+**Setup:**
+1. Edit `config_live.yaml` (project root) to set your provider, model, and
+   `api_key_env` (the name of the env var holding your API key).
+2. Export your API key under that name (e.g. `ANTHROPIC_API_KEY=sk-...`).
+3. Run: `LIVE_TESTS_ENABLED=1 uv run pytest tests/integration/ -v`
+
+The embedder is always `FakeEmbedder` — no embed endpoint is needed.
+All stores are in-memory; no external infra required beyond the LLM key.
+
+**Coverage areas:**
+- `test_streaming.py` — event sequence and token usage invariants
+- `test_tool_roundtrip.py` — real LLM calls `remember_fact`, ≥2 iterations
+- `test_native_memory_tools.py` — `list_facts`, `forget_fact`, `recall` invoked by real LLM
+- `test_working_memory.py` — rollover fires when `buffer_token_budget` is exceeded
+- `test_episodic_memory.py` — `end_conversation` writes one vector point per conversation
+- `test_factual_extraction.py` — durable facts extracted; ephemeral context omitted
+- `test_skills.py` — skill discovered at startup; `read_skill` called; instructions followed
 
 ## Testing posture
 
