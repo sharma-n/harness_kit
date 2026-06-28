@@ -17,7 +17,7 @@ from agent_kit.memory.factual import FactualMemory
 from agent_kit.tools.base import Tool
 
 
-def remember_fact_tool(factual: FactualMemory) -> Tool:
+def remember_fact_tool(factual: FactualMemory, *, episodic_enabled: bool = True) -> Tool:
     async def handler(user_id: str, args: dict[str, Any]) -> str:
         key, value = str(args.get("key", "")), str(args.get("value", ""))
         if not key:
@@ -25,6 +25,12 @@ def remember_fact_tool(factual: FactualMemory) -> Tool:
         await factual.remember(user_id, key, value)
         return f"remembered: {key} = {value}"
 
+    episodic_note = (
+        " Do not use for past discussion topics or conversation context"
+        " — those belong in episodic memory."
+        if episodic_enabled
+        else " Do not use for transient discussion topics or one-off conversation context."
+    )
     return Tool(
         definition=ToolDefinition(
             name="remember_fact",
@@ -33,8 +39,7 @@ def remember_fact_tool(factual: FactualMemory) -> Tool:
                 "Use this for anything timeless and true about the user: preferences, "
                 "occupation, habits, skills, location, dietary needs, constraints, or any "
                 "other stable attribute. Calling with the same key overwrites the previous "
-                "value, so this also serves as an update. Do not use for past discussion "
-                "topics or conversation context — those belong in episodic memory."
+                "value, so this also serves as an update." + episodic_note
             ),
             parameters={
                 "type": "object",

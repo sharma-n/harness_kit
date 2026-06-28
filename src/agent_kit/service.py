@@ -138,9 +138,10 @@ class AgentService:
 
         # Discover skills (sync filesystem I/O — safe in build()).
         skill_manager: SkillManager | None = None
-        # forget_memory is always seeded so users can invoke it without explicit grant;
-        # the ToolPolicy in config.yaml (requires_approval) adds the HITL gate.
-        extra_default_tools: set[str] = {"forget_memory"}
+        # forget_memory is seeded only when episodic memory is enabled; it is meaningless
+        # without a vector store to delete from. The ToolPolicy (requires_approval) adds
+        # the HITL gate when it is active.
+        extra_default_tools: set[str] = {"forget_memory"} if cfg.memory.episodic.enabled else set()
         if cfg.skills.paths:
             skill_manager = SkillManager(discover(cfg.skills.paths))
             if skill_manager.list_all():
@@ -170,12 +171,13 @@ class AgentService:
         )
 
         tools: list[Tool] = [
-            remember_fact_tool(factual),
+            remember_fact_tool(factual, episodic_enabled=cfg.memory.episodic.enabled),
             forget_fact_tool(factual),
             list_facts_tool(factual),
-            recall_tool(episodic),
-            forget_memory_tool(episodic),
         ]
+        if episodic is not None:
+            tools.append(recall_tool(episodic))
+            tools.append(forget_memory_tool(episodic))
         if skill_manager and skill_manager.list_all():
             tools.append(read_skill_tool(skill_manager, stores.skills))
         if extra_tools:
