@@ -131,8 +131,12 @@ class AgentService:
         working = WorkingMemory(
             stores.session, cfg.memory.working, llm=llm, store_retry=store_retry
         )
-        episodic = EpisodicMemory(
-            stores.vectors, embedder, cfg.memory.episodic, llm=llm, store_retry=store_retry
+        episodic: EpisodicMemory | None = (
+            EpisodicMemory(
+                stores.vectors, embedder, cfg.memory.episodic, llm=llm, store_retry=store_retry
+            )
+            if cfg.memory.episodic.enabled
+            else None
         )
         factual = FactualMemory(
             stores.profile, cfg.memory.factual, llm=llm, store_retry=store_retry

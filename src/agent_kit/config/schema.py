@@ -78,6 +78,7 @@ class WorkingMemoryConfig:
 
 @dataclass(slots=True)
 class EpisodicMemoryConfig:
+    enabled: bool = True
     top_k: int = 3
     min_score: float = 0.3
     query_augment_turns: int = 2

@@ -54,7 +54,7 @@ class Agent:
         context_builder: ContextBuilder,
         registry: ToolRegistry,
         working: WorkingMemory,
-        episodic: EpisodicMemory,
+        episodic: EpisodicMemory | None,
         factual: FactualMemory,
         cfg: AgentConfig,
     ) -> None:
@@ -255,9 +255,10 @@ class Agent:
                 return
             if snapshot is None:
                 return
-            await self._episodic.write_conversation(
-                user_id, conversation_id, snapshot.summary, snapshot.buffer
-            )
+            if self._episodic is not None:
+                await self._episodic.write_conversation(
+                    user_id, conversation_id, snapshot.summary, snapshot.buffer
+                )
             await self._working.mark_finalized(conversation_id)
 
     async def sweep_idle(self, idle_finalize_s: float) -> None:

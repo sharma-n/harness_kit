@@ -51,7 +51,7 @@ class AssembledContext:
 class ContextBuilder:
     agent_cfg: AgentConfig
     working: WorkingMemory
-    episodic: EpisodicMemory
+    episodic: EpisodicMemory | None
     factual: FactualMemory
     registry: ToolRegistry
     budgeter: ContextBudgeter
@@ -69,7 +69,11 @@ class ContextBuilder:
             with telemetry.span("memory.factual.get"):
                 profile = await self.factual.get(user_id)
             with telemetry.span("memory.episodic.retrieve"):
-                hits = await self.episodic.retrieve(user_id, user_message, snapshot.buffer)
+                hits = (
+                    await self.episodic.retrieve(user_id, user_message, snapshot.buffer)
+                    if self.episodic is not None
+                    else []
+                )
             with telemetry.span("tools.definitions"):
                 tools = await self.registry.definitions(user_id)
 

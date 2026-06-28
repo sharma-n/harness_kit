@@ -363,4 +363,7 @@ opt-in, key-gated suite). Keep new unit tests network-free.
   the *exact* assembled message list — if you change assembly order or block
   formatting, update it deliberately.
 - Keep the layering. Keep it async. Keep it user-scoped.
+- **If you change the config structure** (add/remove/rename fields in `src/agent_kit/config/schema.py`),
+  update [docs/config.md](docs/config.md) with the new field(s), including type, default, and purpose.
+  This keeps the operator-facing documentation in sync with the code.
 - Update [ROADMAP.md](ROADMAP.md) when you complete or start a milestone.
