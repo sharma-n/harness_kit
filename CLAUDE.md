@@ -261,6 +261,60 @@ only stores grant metadata (who can see which skills).
   it runs in `AgentService.astart()` (called from the serving lifespan / examples).
   Native tools are wired in `build()`; MCP tools `register()` later in `astart()`.
 
+## Per-conversation model switching
+
+A caller can change the LLM model mid-conversation without rebuilding the service. The
+override is stored in the session and takes effect on the next `run_turn` call for that
+conversation; other concurrent conversations are unaffected.
+
+**API:**
+```python
+await service.set_conversation_model(conversation_id, user_id, "claude-opus-4-8")
+# Pass None to revert to the service default:
+await service.set_conversation_model(conversation_id, user_id, None)
+```
+
+**Storage:** `SessionState.model_name: str | None` (a new field on the session record,
+`None` = use the service default). The in-memory adapter stores it as a Python
+attribute; `RedisSessionStore` serializes/deserializes it with `.get("model_name")` for
+forward-compatibility with existing sessions that predate the field.
+`ConversationMeta.model_name` is populated by `SessionStore.list()` and surfaced in
+`encode_conversation` so the `/conversations` listing API exposes which model a
+conversation is using.
+
+**Resolution in `run_turn`:** After context is built, `Agent.run_turn()` does a
+two-gate check before the iteration loop:
+1. `self._llm_factory is not None` — can the service build per-model clients at all?
+   This is `None` when an LLM was externally injected (test path with `FakeLLM`).
+2. `model_override` (i.e. `SessionState.model_name`) — does *this* conversation want a
+   different model? `None` for most conversations → use the service-default `self._llm`.
+
+Both must be true to swap the LLM. `WorkingMemory.get_model_name(conversation_id,
+user_id)` reads the field with a single store lookup (O(1) dict for in-memory).
+
+**Factory:** `AgentService.build()` constructs a `_make_llm` closure when the service
+builds its own `LLMClient` (not when externally injected). The closure captures the
+shared `httpx.AsyncClient`, `cfg.llm_kit`, and a `_llm_cache` dict. Per-model clients
+are built on first use (same connection pool, same API keys, only `model` differs) and
+cached by model name so subsequent calls are free. The factory is `None` when `llm=` is
+injected — `set_conversation_model` raises `ValueError` in that case.
+
+**Serving — WebSocket:** `_receive()` handles a new message type:
+```json
+{"type": "set_model", "user_id": "alice", "model": "claude-opus-4-8"}
+```
+Pass `"model": null` to clear the override.
+
+**Serving — REST (for SSE clients):**
+```
+PUT /conversations/{conversation_id}/model?user_id=alice&model=claude-opus-4-8
+```
+Omit `model` (or pass `null`) to clear. Returns `{"conversation_id": …, "model": …}`.
+
+**Layering note:** `Agent` never imports `llm_kit` directly — it receives a
+`Callable[[str], LLM] | None` factory from `service.py`, which is the only place
+`LLMClient` is constructed. The protocol boundary is preserved.
+
 ## HITL tool approval
 
 - **Config:** add `requires_approval: true` (and optionally `approval_timeout_s`,

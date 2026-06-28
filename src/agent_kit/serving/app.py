@@ -91,6 +91,20 @@ def create_app(service: AgentService) -> FastAPI:
             metas = metas[:limit]
         return {"conversations": [encode_conversation(m) for m in metas]}
 
+    @app.put("/conversations/{conversation_id}/model")
+    async def set_model(
+        conversation_id: str,
+        user_id: str = Query(...),
+        model: str | None = Query(None),
+    ) -> dict:
+        """Set (or clear with ``model=null``) the per-conversation model override.
+
+        The override is stored in the session and picked up by the next turn.
+        SSE clients use this endpoint since they cannot send messages mid-stream.
+        """
+        await service.set_conversation_model(conversation_id, user_id, model)
+        return {"conversation_id": conversation_id, "model": model}
+
     @app.websocket("/ws/{conversation_id}")
     async def ws(websocket: WebSocket, conversation_id: str) -> None:
         await websocket.accept()
@@ -109,6 +123,14 @@ def create_app(service: AgentService) -> FastAPI:
                         # the running turn — no queue needed, just resolve in place.
                         service.agent.resolve_approval(
                             payload["call_id"], bool(payload.get("approved"))
+                        )
+                    elif payload.get("type") == "set_model":
+                        # Store a per-conversation model override; takes effect on the
+                        # next run_turn call for this conversation.
+                        await service.set_conversation_model(
+                            conversation_id,
+                            payload["user_id"],
+                            payload.get("model"),
                         )
                     else:
                         last_user_id = payload["user_id"]

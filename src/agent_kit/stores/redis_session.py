@@ -70,6 +70,7 @@ def _to_json(state: SessionState) -> str:
             for t in state.working_buffer
         ],
         "rolling_summary": state.rolling_summary,
+        "model_name": state.model_name,
         "scratch": state.scratch,
         "updated_at": state.updated_at,
         "finalized_at": state.finalized_at,
@@ -92,6 +93,7 @@ def _from_dict(d: dict[str, Any]) -> SessionState:
         user_id=d["user_id"],
         working_buffer=buffer,
         rolling_summary=d.get("rolling_summary", ""),
+        model_name=d.get("model_name"),
         scratch=d.get("scratch", {}),
         updated_at=d["updated_at"],
         finalized_at=d.get("finalized_at"),
@@ -222,5 +224,6 @@ class RedisSessionStore:
                 finalized_at=d.get("finalized_at"),
                 turn_count=len(d.get("working_buffer", [])),
                 summary_preview=d.get("rolling_summary", "")[:_PREVIEW_LEN],
+                model_name=d.get("model_name"),
             ))
         return metas

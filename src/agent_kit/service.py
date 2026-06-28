@@ -28,6 +28,7 @@ from agent_kit.memory.factual import FactualMemory
 from agent_kit.memory.working import WorkingMemory
 from agent_kit.retry import RetryPolicy
 from agent_kit.stores.factory import Stores, build_stores
+from agent_kit.stores.types import SessionState
 from agent_kit.tools.base import Tool
 from agent_kit.tools.mcp import McpClient, MCPManager
 from agent_kit.tools.native import (
@@ -59,7 +60,9 @@ class AgentService:
     registry: ToolRegistry
     mcp: MCPManager
     skill_manager: SkillManager | None = None
-    _aclose: object = None  # callable cleanup, set by build()
+    _shared_client: object = None   # httpx.AsyncClient; kept for the LLM factory
+    _llm_factory: object = None     # Callable[[str], LLM] | None
+    _aclose: object = None          # callable cleanup, set by build()
 
     @classmethod
     def from_yaml(cls, path: str) -> Self:
@@ -85,6 +88,7 @@ class AgentService:
 
         shared_client = None
         cleanups = []
+        llm_built_internally = llm is None
         if llm is None or embedder is None:
             shared_client = build_async_client(cfg.llm_kit.http)
         if llm is None:
@@ -108,6 +112,29 @@ class AgentService:
             llm = TracingLLM(llm, model=cfg.llm_kit.llm.model)
             embedder = TracingEmbedder(embedder, model=cfg.llm_kit.embed.model)
             cleanups.append(_as_async(telemetry.shutdown))
+
+        # Build a per-model LLM factory only when the service manages its own client.
+        # The factory reuses the shared HTTP session and caches built clients by model
+        # name so subsequent calls for the same model are free. None when an LLM was
+        # externally injected (test path), which disables set_conversation_model().
+        llm_factory = None
+        if llm_built_internally:
+            import dataclasses as _dc
+            _llm_cache: dict[str, LLM] = {}
+
+            def _make_llm(model_name: str) -> LLM:
+                if model_name not in _llm_cache:
+                    new_cfg = _dc.replace(
+                        cfg.llm_kit,
+                        llm=_dc.replace(cfg.llm_kit.llm, model=model_name),
+                    )
+                    client: LLM = LLMClient(new_cfg, client=shared_client, owns_client=False)
+                    if telemetry.is_enabled():
+                        client = TracingLLM(client, model=model_name)
+                    _llm_cache[model_name] = client
+                return _llm_cache[model_name]
+
+            llm_factory = _make_llm
 
         # Discover skills (sync filesystem I/O — safe in build()).
         skill_manager: SkillManager | None = None
@@ -178,7 +205,8 @@ class AgentService:
             skill_manager=skill_manager,
             skill_store=stores.skills,
         )
-        agent = Agent(llm, builder, registry, working, episodic, factual, cfg.agent)
+        agent = Agent(llm, builder, registry, working, episodic, factual, cfg.agent,
+                      llm_factory=llm_factory)
 
         async def _aclose() -> None:
             await agent.drain()
@@ -193,8 +221,33 @@ class AgentService:
             registry=registry,
             mcp=mcp,
             skill_manager=skill_manager,
+            _shared_client=shared_client,
+            _llm_factory=llm_factory,
             _aclose=_aclose,
         )
+
+    async def set_conversation_model(
+        self, conversation_id: str, user_id: str, model_name: str | None
+    ) -> None:
+        """Set (or clear with ``None``) the model override for a conversation.
+
+        The override is stored in the session and picked up by the next
+        ``run_turn`` call for that conversation. Other conversations are unaffected.
+
+        Raises ``ValueError`` when the service was built with an externally-injected
+        LLM (test path — no factory available to construct per-model clients).
+        Raises ``UnauthorizedError`` if ``user_id`` does not own the conversation.
+        """
+        if self._llm_factory is None:
+            raise ValueError(
+                "set_conversation_model requires the service to manage its own LLM "
+                "client (not available when LLM was externally injected)"
+            )
+        state = await self.stores.session.load(conversation_id, user_id)
+        if state is None:
+            state = SessionState(user_id=user_id)
+        state.model_name = model_name
+        await self.stores.session.save(conversation_id, state)
 
     async def astart(self) -> None:
         """Connect configured MCP servers and register their discovered tools.

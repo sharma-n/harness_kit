@@ -77,6 +77,7 @@ class InMemorySessionStore:
                 finalized_at=state.finalized_at,
                 turn_count=len(state.working_buffer),
                 summary_preview=state.rolling_summary[:_PREVIEW_LEN],
+                model_name=state.model_name,
             )
             for conversation_id, state in self._sessions.items()
             if state.user_id == user_id

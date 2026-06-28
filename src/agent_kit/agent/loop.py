@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from llm_kit import Message, StreamEnd, TextChunk
 from llm_kit.llm.response import TokenUsage
@@ -57,8 +57,10 @@ class Agent:
         episodic: EpisodicMemory | None,
         factual: FactualMemory,
         cfg: AgentConfig,
+        llm_factory: Callable[[str], LLM] | None = None,
     ) -> None:
         self._llm = llm
+        self._llm_factory = llm_factory
         self._context = context_builder
         self._registry = registry
         self._working = working
@@ -84,6 +86,16 @@ class Agent:
             input=user_message,
         ) as turn:
             ctx = await self._context.build(user_id, conversation_id, user_message)
+
+            # Two-gate check: factory present (service manages its own LLM) AND this
+            # conversation has a model override. Both required; gate 1 is a capability
+            # check, gate 2 is per-conversation intent.
+            llm = self._llm
+            if self._llm_factory is not None:
+                model_override = await self._working.get_model_name(conversation_id, user_id)
+                if model_override:
+                    llm = self._llm_factory(model_override)
+
             messages = list(ctx.messages)
 
             usage = TokenUsage()
@@ -103,7 +115,7 @@ class Agent:
                     break
 
                 response = None
-                async for event in self._llm.invoke_stream(messages, tools=ctx.tools):
+                async for event in llm.invoke_stream(messages, tools=ctx.tools):
                     if isinstance(event, TextChunk):
                         if event.text:
                             if not _ttft_recorded:

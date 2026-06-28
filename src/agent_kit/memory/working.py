@@ -66,6 +66,11 @@ class WorkingMemory:
             buffer=list(state.working_buffer), summary=state.rolling_summary
         )
 
+    async def get_model_name(self, conversation_id: str, user_id: str) -> str | None:
+        """Return the per-conversation model override, or None for the service default."""
+        state = await self._store.load(conversation_id, user_id)
+        return state.model_name if state else None
+
     async def peek(self, conversation_id: str, user_id: str) -> WorkingSnapshot | None:
         """Read-only load: return the snapshot, or ``None`` if the session is
         absent/expired. Unlike ``load`` it never creates a session — used by the

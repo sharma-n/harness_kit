@@ -66,4 +66,5 @@ def encode_conversation(meta: ConversationMeta) -> dict[str, Any]:
         "finalized_at": meta.finalized_at,
         "turn_count": meta.turn_count,
         "summary_preview": meta.summary_preview,
+        "model_name": meta.model_name,
     }

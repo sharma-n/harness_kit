@@ -35,6 +35,7 @@ class SessionState:
     user_id: str
     working_buffer: list[Turn] = field(default_factory=list)
     rolling_summary: str = ""
+    model_name: str | None = None  # per-conversation LLM override; None = service default
     scratch: dict[str, Any] = field(default_factory=dict)
     updated_at: float = field(default_factory=time.time)
     # Set when the conversation has been embedded as an episodic point at idle.
@@ -65,6 +66,7 @@ class ConversationMeta:
     finalized_at: float | None
     turn_count: int
     summary_preview: str
+    model_name: str | None = None
 
 
 @dataclass(slots=True)
