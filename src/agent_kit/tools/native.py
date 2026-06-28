@@ -102,9 +102,12 @@ def recall_tool(episodic: EpisodicMemory) -> Tool:
         hits = await episodic.retrieve(user_id, query, recent_turns=[])
         if not hits:
             return "no relevant memories found"
-        return "\n".join(
-            f"- ({h.score:.2f}) {h.point.payload.get('text', '')}" for h in hits
-        )
+        lines = []
+        for h in hits:
+            conv_id = h.point.payload.get("conversation_id", "")
+            text = h.point.payload.get("text", "")
+            lines.append(f"- [{conv_id}] ({h.score:.2f}) {text}")
+        return "\n".join(lines)
 
     return Tool(
         definition=ToolDefinition(
@@ -112,7 +115,9 @@ def recall_tool(episodic: EpisodicMemory) -> Tool:
             description=(
                 "Search the user's past conversation topics and discussion threads for relevant "
                 "context. Use this to find past situations, problems the user worked through, or "
-                "topics explored — not to look up facts about the user (use list_facts for that)."
+                "topics explored — not to look up facts about the user (use list_facts for that). "
+                "Each result is prefixed with [conversation_id]; pass that ID to forget_memory "
+                "to remove a specific memory."
             ),
             parameters={
                 "type": "object",
@@ -120,6 +125,41 @@ def recall_tool(episodic: EpisodicMemory) -> Tool:
                     "query": {"type": "string", "description": "What to search for."},
                 },
                 "required": ["query"],
+            },
+        ),
+        handler=handler,
+    )
+
+
+def forget_memory_tool(episodic: EpisodicMemory) -> Tool:
+    async def handler(user_id: str, args: dict[str, Any]) -> str:
+        conversation_id = str(args.get("conversation_id", ""))
+        if not conversation_id:
+            return "error: 'conversation_id' is required"
+        deleted = await episodic.forget_conversation(user_id, conversation_id)
+        if deleted == 0:
+            return f"no memory found for conversation_id: {conversation_id}"
+        return f"forgot {deleted} memory point(s) for conversation: {conversation_id}"
+
+    return Tool(
+        definition=ToolDefinition(
+            name="forget_memory",
+            description=(
+                "Delete all episodic memory (past conversation records) associated with a "
+                "specific conversation. Use this when the user explicitly asks to forget a "
+                "past conversation. Find the conversation_id from the recall tool's output "
+                "(shown in brackets before each result). This action is irreversible — the "
+                "conversation's embeddings are permanently removed."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "conversation_id": {
+                        "type": "string",
+                        "description": "The conversation_id to forget, as shown in recall output.",
+                    },
+                },
+                "required": ["conversation_id"],
             },
         ),
         handler=handler,

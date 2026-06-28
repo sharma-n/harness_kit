@@ -88,6 +88,29 @@ class VectorStore(Protocol):
         min_score: float,
     ) -> list[MemoryHit]: ...
 
+    async def delete(self, point_ids: list[str], *, user_id: str) -> None:
+        """Delete points by their agent_kit string IDs, verifying ownership.
+
+        Each adapter must check ``payload["user_id"] == user_id`` before
+        deleting. IDs that are missing or belong to a different user are
+        silently skipped — never raise on a missing/mismatched ID.
+        """
+        ...
+
+    async def list_points(
+        self,
+        user_id: str,
+        kind: str | None = None,
+        offset: int = 0,
+        limit: int = 256,
+    ) -> list[MemoryPoint]:
+        """Paginated enumeration of a user's points, optionally filtered by
+        ``kind`` ("conversation" | "moment").  User-scoped: only returns points
+        owned by ``user_id``.  Stable ordering by ``ts`` ascending so that
+        pagination is deterministic.
+        """
+        ...
+
 
 @runtime_checkable
 class PermissionStore(Protocol):

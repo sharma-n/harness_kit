@@ -18,6 +18,7 @@ budgeter handling density via score-based eviction.
 from __future__ import annotations
 
 import logging
+import math
 import time
 
 from pydantic import BaseModel
@@ -72,11 +73,56 @@ class EpisodicMemory:
         """Top-k hits above ``min_score`` for this user, or ``[]`` (inject nothing)."""
         query_text = await self._build_query(user_message, recent_turns)
         vector = (await self._embedder.embed_one(query_text)).vector
+        # When decay is active, fetch extra candidates so re-ranking can surface
+        # fresher points that fell just below an unweighted top-k cutoff.
+        fetch_k = self._cfg.top_k * 2 if self._cfg.decay_rate > 0.0 else self._cfg.top_k
         results = await self._store.search(
-            user_id, vector, k=self._cfg.top_k, min_score=self._cfg.min_score
+            user_id, vector, k=fetch_k, min_score=self._cfg.min_score
         )
+        if self._cfg.decay_rate > 0.0:
+            results = self._apply_decay(results)
         _metrics.record_retrieval(len(results))
         return results
+
+    def _apply_decay(self, hits: list[MemoryHit]) -> list[MemoryHit]:
+        """Multiply each hit's score by exp(-decay_rate * age_days), then re-rank."""
+        now = time.time()
+        decayed: list[MemoryHit] = []
+        for h in hits:
+            ts = h.point.payload.get("ts")
+            if ts is not None:
+                age_days = max(0.0, (now - float(ts)) / 86400.0)
+                factor = math.exp(-self._cfg.decay_rate * age_days)
+                decayed.append(MemoryHit(point=h.point, score=h.score * factor))
+            else:
+                decayed.append(h)
+        decayed.sort(key=lambda h: h.score, reverse=True)
+        return decayed[: self._cfg.top_k]
+
+    async def forget_conversation(self, user_id: str, conversation_id: str) -> int:
+        """Delete the conv: point and all moment: siblings for this conversation.
+
+        Returns the count of points deleted (0 means nothing was found).
+        User isolation is enforced via ``list_points`` (which is always
+        user-scoped), so a guessed ``conversation_id`` belonging to another
+        user returns 0 rather than deleting anything.
+        """
+        conv_points = await self._store.list_points(user_id, kind="conversation")
+        moment_points = await self._store.list_points(user_id, kind="moment")
+        ids = [
+            p.id for p in conv_points if p.id == f"conv:{conversation_id}"
+        ] + [
+            p.id for p in moment_points
+            if p.payload.get("conversation_id") == conversation_id
+        ]
+        if not ids:
+            return 0
+        await store_write(
+            lambda: self._store.delete(ids, user_id=user_id),
+            policy=self._store_retry,
+            operation="episodic.forget_conversation",
+        )
+        return len(ids)
 
     async def write_conversation(
         self,

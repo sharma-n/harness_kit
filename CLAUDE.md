@@ -70,7 +70,7 @@ src/agent_kit/
                · memory_*.py (in-memory adapters) · stubs.py (real adapters, NotImplementedError)
                · factory.py (backend select; build_stores returns Stores bundle)
   memory/      working.py (buffer + token-budget rollover) · episodic.py (conversation-end
-               embed) · factual.py (cognition over the stores)
+               embed + runtime age-decay + forget_conversation) · factual.py (cognition over the stores)
   skills/      loader.py (SKILL.md parser + discover) · manager.py (SkillManager index)
                · __init__.py (exports)
   tools/       base.py (Tool) · registry.py (user-scoped exec + per-tool policy) · native.py
@@ -78,6 +78,9 @@ src/agent_kit/
                token bucket) · mcp.py (MCPServerClient connect/discover + MCPManager aggregate)
   agent/       events.py (AgentEvent) · context.py (assembly §6.2) · budgeter.py (tiers §6.5)
                · loop.py (run_turn §5 + end_conversation)
+  jobs/        _base.py (load_all_user_points) · dedup.py (EpisodicDeduplicator, cosine+Union-Find
+               clustering, llm_kit batch merge) · resummarize.py (EpisodicResummarizer, llm_kit
+               batch re-summarize + embed) · __main__.py (CLI: python -m agent_kit.jobs)
   serving/     wire.py (AgentEvent→frame) · app.py (FastAPI ws + sse)
   service.py   composition root: config → stores → skills → tools → agent
   llm.py       LLM / Embedder Protocols over llm_kit
@@ -136,13 +139,16 @@ config.yaml    one global config; agent_kit sections + nested llm_kit block
 - **Conversation end is a two-stage idle lifecycle, not a single TTL** (config
   validates `idle_finalize_s < ttl_s`). `idle_finalize_s` fires first: the conversation
   is embedded but the session stays loadable so a returning user resumes seamlessly;
-  `ttl_s` then evicts. `end_conversation` is best-effort and **idempotent** — missing/
-  expired session or non-owner caller → no-op; `SessionState.finalized_at` (cleared on
-  any new activity) stops re-embedding until the conversation is resumed. It is driven
-  from two places: **WebSocket disconnect** in `serving/app.py` (fast path) and a
-  **background idle sweeper** (`Agent.sweep_idle`, started in the serving lifespan,
-  cadence `sweep_interval_s`). The sweeper is what gives **SSE** — which has no
-  disconnect signal — a conversation-end event, and also catches abrupt WS drops.
+  `ttl_s` then evicts **the session from SessionStore only** — embeddings remain in
+  VectorStore indefinitely (there is no TTL enforcement or deletion in the VectorStore
+  Protocol; embeddings are write-only). `end_conversation` is best-effort and
+  **idempotent** — missing/expired session or non-owner caller → no-op;
+  `SessionState.finalized_at` (cleared on any new activity) stops re-embedding until
+  the conversation is resumed. It is driven from two places: **WebSocket disconnect**
+  in `serving/app.py` (fast path) and a **background idle sweeper**
+  (`Agent.sweep_idle`, started in the serving lifespan, cadence `sweep_interval_s`).
+  The sweeper is what gives **SSE** — which has no disconnect signal — a
+  conversation-end event, and also catches abrupt WS drops.
 
 - **Background writes are fire-and-forget with logging + retry** — `extract`, `maybe_rollover`,
   `mark_finalized`, and `write_conversation` are enqueued via `Agent._enqueue()` and run
@@ -152,6 +158,33 @@ config.yaml    one global config; agent_kit sections + nested llm_kit block
   the store call, not the preceding LLM/embedder step — that's already retried by llm_kit,
   so a transient store fault never re-runs the model. Tunable via `MemoryConfig.store_retry`.
   All background store ops are verified idempotent (except append-only `append_turn`).
+
+## Offline jobs design decisions (M8)
+
+- **`jobs/` sits alongside `serving/`** at the top of the layer stack. It imports from
+  `stores/`, `memory/`, `config/`, and directly from `llm_kit` (concrete clients with
+  `run_batch_stream` / `embed_batch`). It does NOT import from `agent/` or `serving/`.
+  Jobs are CLI scripts, not embedded in the FastAPI lifespan.
+
+- **VectorStore Protocol gained `delete` and `list_points`**. The existing "write-only"
+  invariant was updated: `delete(point_ids, *, user_id)` verifies ownership inside the
+  adapter before deleting — the caller is never trusted to pass only their own IDs.
+  Qdrant verifies via `retrieve()` (fetch + payload check) then deletes only owned UUIDs.
+
+- **Age-decay is runtime, not a batch job** (`EpisodicMemoryConfig.decay_rate = 0.05`).
+  `retrieve()` multiplies each hit's score by `exp(-rate * age_days)` after fetching
+  `top_k * 2` candidates, then re-sorts and re-caps. Zero writes, always current.
+
+- **Dedup uses cosine similarity + Union-Find** (not HDBSCAN). Pairwise cosine matrix
+  (numpy), edges where `sim >= similarity_threshold`, connected components via Union-Find
+  with path compression. Handles transitivity correctly. No new dependencies.
+
+- **`forget_memory` tool** — episodic counterpart to `forget_fact`. Deletes the
+  `conv:{id}` point and all `moment:{id}:N` siblings for a conversation. User isolation
+  enforced via `list_points` (user-scoped). Seeded into default allowlist with
+  `requires_approval: true` in config.yaml — the HITL gate prevents accidental deletion.
+  `recall` output was updated to include `[conversation_id]` prefix so the model has a
+  handle to pass to `forget_memory`.
 
 ## Skills design decisions (agentskills.io format)
 

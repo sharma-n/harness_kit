@@ -53,3 +53,24 @@ class InMemoryVectorStore:
 
         hits.sort(key=lambda h: h.score, reverse=True)
         return hits[:k]
+
+    async def delete(self, point_ids: list[str], *, user_id: str) -> None:
+        for pid in point_ids:
+            p = self._points.get(pid)
+            if p is not None and p.payload.get("user_id") == user_id:
+                del self._points[pid]
+
+    async def list_points(
+        self,
+        user_id: str,
+        kind: str | None = None,
+        offset: int = 0,
+        limit: int = 256,
+    ) -> list[MemoryPoint]:
+        candidates = [
+            p for p in self._points.values()
+            if p.payload.get("user_id") == user_id
+            and (kind is None or p.payload.get("kind") == kind)
+        ]
+        candidates.sort(key=lambda p: p.payload.get("ts", 0.0))
+        return candidates[offset : offset + limit]

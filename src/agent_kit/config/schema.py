@@ -86,6 +86,11 @@ class EpisodicMemoryConfig:
         "Rewrite the user's text into a single standalone search query "
         "that resolves pronouns and ellipsis. Return only the query."
     )
+    # Temporal decay applied to retrieval scores at query time: score *= exp(-decay_rate * age_days).
+    # 0.05 halves a score after ~14 days, biasing retrieval toward recent context.
+    # Set to 0.0 to disable decay entirely.
+    decay_rate: float = 0.05
+
     # When enabled, the LLM flags 1–max_flagged_moments notable discussion threads
     # within each conversation at finalization time. Each is embedded as a sibling
     # point (kind="moment") alongside the whole-conversation point, improving recall
@@ -303,6 +308,44 @@ class TelemetryConfig:
 
 
 @dataclass(slots=True)
+class DeduplicationConfig:
+    """Config for the episodic deduplication batch job (M8).
+
+    Near-identical conversation points (cosine similarity >= ``similarity_threshold``)
+    are clustered via Union-Find, merged into a single point by the LLM, and the
+    originals are deleted. Default threshold is tight — reconnected-session duplicates
+    and near-verbatim paraphrases only. Lower cautiously: 0.85 may merge
+    topic-adjacent but semantically distinct conversations.
+    """
+
+    similarity_threshold: float = 0.92
+    max_points_per_user: int = 10_000
+    worker_concurrency: int = 8
+
+
+@dataclass(slots=True)
+class ResummarizationConfig:
+    """Config for the episodic re-summarization batch job (M8).
+
+    Conversation points older than ``min_age_days`` have their text condensed
+    by the LLM and their embedding refreshed, keeping retrieval quality high
+    as the user's context evolves.
+    """
+
+    min_age_days: float = 90.0
+    max_points_per_user: int = 500
+    worker_concurrency: int = 8
+
+
+@dataclass(slots=True)
+class JobsConfig:
+    """Top-level config for offline batch jobs (M8)."""
+
+    deduplication: DeduplicationConfig = field(default_factory=DeduplicationConfig)
+    resummarization: ResummarizationConfig = field(default_factory=ResummarizationConfig)
+
+
+@dataclass(slots=True)
 class AgentKitConfig:
     """Top-level config. Compose from YAML via ``AgentKitConfig.from_yaml``."""
 
@@ -313,6 +356,7 @@ class AgentKitConfig:
     mcp: McpConfig = field(default_factory=McpConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
+    jobs: JobsConfig = field(default_factory=JobsConfig)
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     llm_kit: AppConfig = field(default_factory=AppConfig)

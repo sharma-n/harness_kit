@@ -211,20 +211,50 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
 
 ## Not started
 
-### ⬜ M8 — Offline jobs (`llm_kit` batch engine)
-- Nightly memory consolidation:
-  - **Episodic decay**: age-weight older conversation points lower so fresh context
-    ranks higher in retrieval without deleting older knowledge entirely.
-  - **Episodic deduplication**: semantic clustering — if two conversations are
-    sufficiently similar (cosine distance below threshold), merge them into a single
-    composite summary to keep the vector store lean.
-  - **Episodic re-summarization**: periodically re-embed and re-summarize long
-    conversation groups to reduce noise and keep embeddings current as user profile
-    evolves (e.g., quarterly pass over user's episodic points).
-  - Trade-off: keep recall broad (old context still findable) while prioritizing
-    relevance (new context ranks first) and keeping vector store scalable.
-- Bulk re-embedding of a knowledge base (when embedder changes or new docs added).
-- Eval runs over conversation logs (accuracy metrics, tool invocation patterns).
+### ✅ M8 — Offline jobs (`llm_kit` batch engine)
+
+**VectorStore Protocol extension:**
+- `delete(point_ids, *, user_id)` — ownership-verified deletion; adapters check `payload["user_id"]`
+  before deleting; missing/wrong-user IDs silently skipped. Implemented in `InMemoryVectorStore`
+  and `QdrantVectorStore` (Qdrant verifies via `retrieve()` before `delete()`).
+- `list_points(user_id, kind, offset, limit)` — paginated, user-scoped enumeration filtered
+  by `kind` ("conversation"|"moment"). In-memory sorts by `ts` ascending; Qdrant uses `scroll()`.
+
+**Runtime age-decay** (`memory/episodic.py`):
+- `EpisodicMemoryConfig.decay_rate: float = 0.05` — score multiplied by `exp(-rate * age_days)`
+  at retrieval time. Default 0.05 ≈ halves score after ~14 days. Set `0.0` to disable.
+  Fetches `top_k * 2` candidates when active so re-ranking can surface fresher points.
+  No writes, no batch job — a multiply per returned hit.
+
+**Offline deduplication job** (`jobs/dedup.py`):
+- Loads all `kind="conversation"` and `kind="moment"` points per user.
+- Builds cosine similarity matrix (numpy) and finds connected components via Union-Find
+  (handles transitivity: if A~B~C they form one cluster even if A,C aren't directly similar).
+- For each cluster (size ≥ 2): LLM merge via `llm_kit.batch.run_batch_stream`;
+  re-embed via `embedder.embed_batch`; upsert merged point; delete originals + moment siblings.
+- Config: `similarity_threshold=0.92`, `max_points_per_user=10000`, `worker_concurrency=8`.
+
+**Offline re-summarization job** (`jobs/resummarize.py`):
+- Filters conversation points older than `min_age_days` (default 90).
+- Condenses text via LLM batch, re-embeds, upserts with same point ID (original `ts` preserved;
+  `resummarized_at` added to payload). Moment points excluded (already short).
+- Config: `min_age_days=90.0`, `max_points_per_user=500`, `worker_concurrency=8`.
+
+**CLI** (`jobs/__main__.py`):
+```
+python -m agent_kit.jobs dedup        --config config.yaml --users alice,bob
+python -m agent_kit.jobs resummarize  --config config.yaml --users alice,bob
+```
+
+**`forget_memory` tool** (`tools/native.py`):
+- Agent-facing episodic deletion: mirrors `forget_fact` for episodic memory.
+- `forget_conversation(user_id, conversation_id)` deletes the `conv:` point and all
+  `moment:` siblings. User isolation enforced via `list_points` (user-scoped).
+- `recall` output now includes `[conv_id]` prefix on each hit so the model can target a
+  specific conversation.
+- Seeded into default allowlist; `requires_approval: true` set in `config.yaml` (HITL gate).
+
+**Config:** `jobs: JobsConfig` added to `AgentKitConfig` (both `deduplication` and `resummarization` sub-blocks).
 
 ### ✅ Live / integration testing
 `tests/integration/` — opt-in suite (skipped unless `LIVE_TESTS_ENABLED=1`).

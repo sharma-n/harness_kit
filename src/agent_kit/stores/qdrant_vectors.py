@@ -28,6 +28,7 @@ try:
         FieldCondition,
         Filter,
         MatchValue,
+        PointIdsList,
         PointStruct,
         VectorParams,
     )
@@ -141,3 +142,61 @@ class QdrantVectorStore:
                 score=scored.score,
             ))
         return hits
+
+    async def delete(self, point_ids: list[str], *, user_id: str) -> None:
+        if not point_ids:
+            return
+        await self._ensure_collection()
+        qdrant_ids = [_to_qdrant_id(pid) for pid in point_ids]
+        # Retrieve points to verify ownership before deleting.
+        records = await self._client.retrieve(
+            collection_name=self._collection,
+            ids=qdrant_ids,
+            with_payload=True,
+            with_vectors=False,
+        )
+        owned = [r.id for r in records if (r.payload or {}).get("user_id") == user_id]
+        if not owned:
+            return
+        await self._client.delete(
+            collection_name=self._collection,
+            points_selector=PointIdsList(points=owned),
+        )
+
+    async def list_points(
+        self,
+        user_id: str,
+        kind: str | None = None,
+        offset: int = 0,
+        limit: int = 256,
+    ) -> list[MemoryPoint]:
+        await self._ensure_collection()
+        must = [FieldCondition(key="user_id", match=MatchValue(value=user_id))]
+        if kind is not None:
+            must.append(FieldCondition(key="kind", match=MatchValue(value=kind)))
+        scroll_filter = Filter(must=must)
+        all_points: list[MemoryPoint] = []
+        next_page_offset = None
+        while True:
+            records, next_page_offset = await self._client.scroll(
+                collection_name=self._collection,
+                scroll_filter=scroll_filter,
+                limit=256,
+                offset=next_page_offset,
+                with_vectors=True,
+                with_payload=True,
+            )
+            for record in records:
+                payload = dict(record.payload or {})
+                original_id = payload.pop(_AK_ID_KEY, str(record.id))
+                vector = record.vector or []
+                if isinstance(vector, dict):
+                    vector = list(next(iter(vector.values()), []))
+                all_points.append(
+                    MemoryPoint(id=original_id, vector=list(vector), payload=payload)
+                )
+            if next_page_offset is None:
+                break
+        # Sort by ts ascending for deterministic pagination (same as in-memory adapter).
+        all_points.sort(key=lambda p: p.payload.get("ts", 0.0))
+        return all_points[offset : offset + limit]

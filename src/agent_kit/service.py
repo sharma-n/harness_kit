@@ -32,6 +32,7 @@ from agent_kit.tools.base import Tool
 from agent_kit.tools.mcp import McpClient, MCPManager
 from agent_kit.tools.native import (
     forget_fact_tool,
+    forget_memory_tool,
     list_facts_tool,
     recall_tool,
     remember_fact_tool,
@@ -110,13 +111,15 @@ class AgentService:
 
         # Discover skills (sync filesystem I/O — safe in build()).
         skill_manager: SkillManager | None = None
-        extra_skill_tools: set[str] = set()
+        # forget_memory is always seeded so users can invoke it without explicit grant;
+        # the ToolPolicy in config.yaml (requires_approval) adds the HITL gate.
+        extra_default_tools: set[str] = {"forget_memory"}
         if cfg.skills.paths:
             skill_manager = SkillManager(discover(cfg.skills.paths))
             if skill_manager.list_all():
-                extra_skill_tools.add("read_skill")
+                extra_default_tools.add("read_skill")
 
-        stores = build_stores(cfg, extra_default_allowed=extra_skill_tools or None)
+        stores = build_stores(cfg, extra_default_allowed=extra_default_tools)
         # Map the config's StoreRetryConfig onto the retry leaf's RetryPolicy (kept as
         # two types so retry.py need not import config). Shared across all three writes.
         store_retry = RetryPolicy(
@@ -140,6 +143,7 @@ class AgentService:
             forget_fact_tool(factual),
             list_facts_tool(factual),
             recall_tool(episodic),
+            forget_memory_tool(episodic),
         ]
         if skill_manager and skill_manager.list_all():
             tools.append(read_skill_tool(skill_manager, stores.skills))
