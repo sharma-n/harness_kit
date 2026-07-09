@@ -56,12 +56,13 @@ class ToolRegistry:
         *,
         per_tool_timeout_s: float = 30.0,
         policies: dict[str, ToolPolicy] | None = None,
+        max_rate_limit_buckets: int = 1000,
     ) -> None:
         self._tools = {t.name: t for t in tools}
         self._permissions = permissions
         self._timeout = per_tool_timeout_s
         self._policies = policies or {}
-        self._ratelimiter = ToolRateLimiter()
+        self._ratelimiter = ToolRateLimiter(max_buckets=max_rate_limit_buckets)
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool

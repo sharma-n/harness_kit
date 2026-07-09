@@ -17,11 +17,17 @@ Scaling caveat (same as ``llm_kit``'s own limiter): buckets live in process memo
 so in a multi-worker deployment each worker enforces the limit independently — the
 effective ceiling is roughly ``workers × rate_limit_per_minute``. A shared-store
 (Redis) backing is a later scaling step, not needed for the reference implementation.
+
+Unbounded growth (1.7): buckets are now stored in a bounded LRU so the per-``(user_id,
+tool_name)`` dict never grows without bound. The oldest (least-recently-used) bucket is
+evicted when the cap is exceeded.
 """
 
 from __future__ import annotations
 
 import time
+
+from agent_kit.util import BoundedLRUDict
 
 
 class _Bucket:
@@ -57,12 +63,12 @@ class _Bucket:
 
 
 class ToolRateLimiter:
-    """Lazily-created per-``(user_id, tool_name)`` token buckets."""
+    """Lazily-created per-``(user_id, tool_name)`` token buckets with bounded memory."""
 
     __slots__ = ("_buckets",)
 
-    def __init__(self) -> None:
-        self._buckets: dict[tuple[str, str], _Bucket] = {}
+    def __init__(self, max_buckets: int = 1000) -> None:
+        self._buckets: BoundedLRUDict[tuple[str, str], _Bucket] = BoundedLRUDict(max_buckets)
 
     def try_acquire(self, user_id: str, tool: str, per_minute: int) -> bool:
         """Return ``True`` if this user may invoke ``tool`` now, else ``False``.

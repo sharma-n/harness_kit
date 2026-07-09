@@ -36,6 +36,7 @@ class AgentConfig:
     max_iterations: int = 6
     per_tool_timeout_s: float = 30.0
     per_turn_budget_s: float | None = None
+    max_cached_models: int = 1000
     system_prompt: str = "You are a helpful assistant."
     factual_block_header: str = "What you know about this user:"
     episodic_block_header: str = "Relevant memories from past conversations:"
@@ -253,10 +254,15 @@ class ToolPolicy:
 @dataclass(slots=True)
 class ToolsConfig:
     """Global fallback allowlist for users with no per-user grant in the store,
-    plus optional per-tool execution policy (keyed by tool name)."""
+    plus optional per-tool execution policy (keyed by tool name).
+
+    ``max_rate_limit_buckets`` caps the number of concurrent (user, tool) rate-limiter
+    buckets in memory. When exceeded, the least-recently-used bucket is evicted.
+    """
 
     default_allowed: list[str] = field(default_factory=list)
     definitions: dict[str, ToolPolicy] = field(default_factory=dict)
+    max_rate_limit_buckets: int = 1000
 
 
 @dataclass(slots=True)

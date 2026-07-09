@@ -41,6 +41,7 @@ from agent_kit.tools.native import (
 from agent_kit.tools.registry import ToolRegistry
 from agent_kit.tools.skill_tools import read_skill_tool
 from agent_kit.skills import SkillManager, discover
+from agent_kit.util import BoundedLRUDict
 
 
 def _as_async(fn):
@@ -120,19 +121,21 @@ class AgentService:
         llm_factory = None
         if llm_built_internally:
             import dataclasses as _dc
-            _llm_cache: dict[str, LLM] = {}
+            _llm_cache: BoundedLRUDict[str, LLM] = BoundedLRUDict(cfg.agent.max_cached_models)
 
             def _make_llm(model_name: str) -> LLM:
-                if model_name not in _llm_cache:
-                    new_cfg = _dc.replace(
-                        cfg.llm_kit,
-                        llm=_dc.replace(cfg.llm_kit.llm, model=model_name),
-                    )
-                    client: LLM = LLMClient(new_cfg, client=shared_client, owns_client=False)
-                    if telemetry.is_enabled():
-                        client = TracingLLM(client, model=model_name)
-                    _llm_cache[model_name] = client
-                return _llm_cache[model_name]
+                cached = _llm_cache.get(model_name)
+                if cached is not None:
+                    return cached
+                new_cfg = _dc.replace(
+                    cfg.llm_kit,
+                    llm=_dc.replace(cfg.llm_kit.llm, model=model_name),
+                )
+                client: LLM = LLMClient(new_cfg, client=shared_client, owns_client=False)
+                if telemetry.is_enabled():
+                    client = TracingLLM(client, model=model_name)
+                _llm_cache[model_name] = client
+                return client
 
             llm_factory = _make_llm
 
@@ -187,6 +190,7 @@ class AgentService:
             stores.permissions,
             per_tool_timeout_s=cfg.agent.per_tool_timeout_s,
             policies=cfg.tools.definitions,
+            max_rate_limit_buckets=cfg.tools.max_rate_limit_buckets,
         )
         # MCP servers are connected lazily in ``astart`` (an async step build() can't
         # await); discovered tools are registered then.
