@@ -18,11 +18,13 @@ and episodic/factual writes are enqueued off the hot path.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 
-from llm_kit import Message, StreamEnd, TextChunk
+from llm_kit import Message, StreamEnd, TextChunk, ToolCall
 from llm_kit.llm.response import TokenUsage
 
 from harness_kit.agent.context import ContextBuilder
@@ -147,53 +149,11 @@ class Agent:
                     messages.append(
                         Message.assistant_tool_calls(tool_calls, text=response.text or None)
                     )
-                    for call in tool_calls:
-                        policy = self._registry.get_policy(call.name)
-                        if policy and policy.requires_approval:
-                            fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-                            self._pending_approvals[call.id] = (fut, conversation_id)
-                            yield ToolApprovalRequired(
-                                call_id=call.id,
-                                name=call.name,
-                                arguments=call.arguments,
-                                timeout_s=policy.approval_timeout_s,
-                            )
-                            timed_out = False
-                            try:
-                                approved = await asyncio.wait_for(
-                                    fut, timeout=policy.approval_timeout_s
-                                )
-                            except asyncio.TimeoutError:
-                                approved = False
-                                timed_out = True
-                            finally:
-                                self._pending_approvals.pop(call.id, None)
-                            if not approved:
-                                reason = (
-                                    f"tool {call.name!r} — approval request timed out"
-                                    if timed_out
-                                    else f"tool {call.name!r} — user denied approval"
-                                )
-                                yield ToolResult(
-                                    call_id=call.id, name=call.name, ok=False, content=reason
-                                )
-                                messages.append(Message.tool_result(call.id, reason))
-                                continue
-
-                        yield ToolCallStarted(
-                            call_id=call.id, name=call.name, arguments=call.arguments
-                        )
-                        execution = await self._registry.execute(user_id, call)
-                        yield ToolResult(
-                            call_id=execution.call_id,
-                            name=execution.name,
-                            ok=execution.ok,
-                            content=execution.display,
-                        )
-                        messages.append(Message.tool_result(call.id, execution.observation))
-                        # Persist tool turns using truncated display text, not full observation.
-                        tool_turns.append(Turn(role="assistant", text="", tool_calls=[call]))
-                        tool_turns.append(Turn(role="tool", text=execution.display, tool_call_id=call.id))
+                    async with contextlib.aclosing(
+                        self._execute_tool_calls(user_id, conversation_id, tool_calls, messages, tool_turns)
+                    ) as gen:
+                        async for event in gen:
+                            yield event
                 else:
                     # for-loop exhausted without break → hit the iteration cap.
                     stop_reason = "max_iterations"
@@ -220,6 +180,136 @@ class Agent:
                 yield TurnFailed(error=error_msg)
                 # Re-raise so telemetry/outer handlers still see the failure.
                 raise
+
+    async def _call_worker(
+        self,
+        user_id: str,
+        conversation_id: str,
+        call: ToolCall,
+        index: int,
+        queue: asyncio.Queue[AgentEvent | _WorkerDone],
+    ) -> None:
+        """Run one tool call end-to-end (approval gate + execution), pushing every
+        ``AgentEvent`` it produces onto ``queue`` in real time, finishing with
+        exactly one ``_WorkerDone`` so the fan-in loop can append this call's
+        message/turns in the right slot once all calls are done.
+
+        Mirrors the exact approval + execution logic that used to live inline in
+        ``run_turn``'s ``for call in tool_calls`` loop — unchanged in substance,
+        just retargeted from ``yield`` to ``await queue.put`` since this now runs
+        as an independent ``asyncio.Task``, not inline in the generator.
+        """
+        try:
+            policy = self._registry.get_policy(call.name)
+            if policy and policy.requires_approval:
+                fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+                self._pending_approvals[call.id] = (fut, conversation_id)
+                await queue.put(
+                    ToolApprovalRequired(
+                        call_id=call.id,
+                        name=call.name,
+                        arguments=call.arguments,
+                        timeout_s=policy.approval_timeout_s,
+                    )
+                )
+                timed_out = False
+                try:
+                    approved = await asyncio.wait_for(fut, timeout=policy.approval_timeout_s)
+                except asyncio.TimeoutError:
+                    approved = False
+                    timed_out = True
+                finally:
+                    self._pending_approvals.pop(call.id, None)
+                if not approved:
+                    reason = (
+                        f"tool {call.name!r} — approval request timed out"
+                        if timed_out
+                        else f"tool {call.name!r} — user denied approval"
+                    )
+                    await queue.put(ToolResult(call_id=call.id, name=call.name, ok=False, content=reason))
+                    await queue.put(_WorkerDone(index, Message.tool_result(call.id, reason), []))
+                    return
+
+            await queue.put(
+                ToolCallStarted(call_id=call.id, name=call.name, arguments=call.arguments)
+            )
+            execution = await self._registry.execute(user_id, call)
+            await queue.put(
+                ToolResult(
+                    call_id=execution.call_id,
+                    name=execution.name,
+                    ok=execution.ok,
+                    content=execution.display,
+                )
+            )
+            turns = [
+                Turn(role="assistant", text="", tool_calls=[call]),
+                Turn(role="tool", text=execution.display, tool_call_id=call.id),
+            ]
+            await queue.put(
+                _WorkerDone(index, Message.tool_result(call.id, execution.observation), turns)
+            )
+        except Exception as exc:
+            # Belt-and-suspenders: ToolRegistry.execute() never raises, but a bug
+            # here (or in a future change) must still degrade to a failed
+            # observation for THIS call, not abort the whole batch/turn — the
+            # same "tool errors are observations, never exceptions" invariant
+            # the sequential code already relied on. asyncio.CancelledError is a
+            # BaseException, not caught here, so generator-teardown cancellation
+            # (see _execute_tool_calls) still propagates correctly.
+            logger.exception(
+                "unexpected error in tool worker (call_id=%s name=%s)", call.id, call.name
+            )
+            reason = f"tool {call.name!r} failed unexpectedly: {exc}"
+            await queue.put(ToolResult(call_id=call.id, name=call.name, ok=False, content=reason))
+            await queue.put(_WorkerDone(index, Message.tool_result(call.id, reason), []))
+
+    async def _execute_tool_calls(
+        self,
+        user_id: str,
+        conversation_id: str,
+        tool_calls: list[ToolCall],
+        messages: list[Message],
+        tool_turns: list[Turn],
+    ) -> AsyncIterator[AgentEvent]:
+        """Run every call in ``tool_calls`` concurrently; stream events in real
+        arrival order, then append each call's ``Message``/``Turn`` entries to
+        ``messages``/``tool_turns`` (mutated in place) in ORIGINAL ``tool_calls``
+        order once every call has finished — the one ordering guarantee the LLM's
+        message history depends on. Completion order is irrelevant.
+        """
+        queue: asyncio.Queue[AgentEvent | _WorkerDone] = asyncio.Queue()
+        tasks = [
+            asyncio.create_task(
+                self._call_worker(user_id, conversation_id, call, index, queue)
+            )
+            for index, call in enumerate(tool_calls)
+        ]
+        results: list[tuple[Message, list[Turn]] | None] = [None] * len(tool_calls)
+        remaining = len(tasks)
+        try:
+            while remaining > 0:
+                item = await queue.get()
+                if isinstance(item, _WorkerDone):
+                    results[item.index] = (item.message, item.tool_turns)
+                    remaining -= 1
+                else:
+                    yield item
+        finally:
+            # Covers both normal completion (no-op here) and early teardown —
+            # e.g. the WS client disconnects mid-batch and the caller stops
+            # driving this generator. Without this, abandoned worker tasks
+            # (possibly still parked on an approval future) would keep running
+            # in the background forever, and the entry in
+            # ``self._pending_approvals`` would leak.
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        for message, turns in results:  # every slot is filled: remaining hit 0
+            messages.append(message)
+            tool_turns.extend(turns)
 
     async def _persist(
         self,
@@ -369,6 +459,22 @@ async def _guard(
             user_id,
             conversation_id,
         )
+
+
+@dataclass(slots=True)
+class _WorkerDone:
+    """Internal sentinel: one tool-call worker has finished.
+
+    Carries the ``Message``/``Turn`` entries the fan-in loop must append to the
+    turn's running history — applied in the ORIGINAL ``tool_calls`` order once
+    every worker has reported done, never in completion order. Keyed by
+    ``index`` (not ``call.id``) so a duplicate/malformed id from a buggy LLM
+    response can't silently clobber another call's result.
+    """
+
+    index: int
+    message: Message
+    tool_turns: list[Turn]
 
 
 def _accumulate(a: TokenUsage, b: TokenUsage) -> TokenUsage:
