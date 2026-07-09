@@ -17,12 +17,12 @@ import time
 
 import pytest
 
-from agent_kit.errors import UnauthorizedError
-from agent_kit.stores.qdrant_vectors import QdrantVectorStore
-from agent_kit.stores.redis_session import RedisSessionStore
-from agent_kit.stores.sqlite_permissions import SqlitePermissionStore
-from agent_kit.stores.sqlite_profile import SqliteProfileStore
-from agent_kit.stores.types import MemoryPoint, SessionState, Turn
+from harness_kit.errors import UnauthorizedError
+from harness_kit.stores.qdrant_vectors import QdrantVectorStore
+from harness_kit.stores.redis_session import RedisSessionStore
+from harness_kit.stores.sqlite_permissions import SqlitePermissionStore
+from harness_kit.stores.sqlite_profile import SqliteProfileStore
+from harness_kit.stores.types import MemoryPoint, SessionState, Turn
 
 
 # ---------------------------------------------------------------------------

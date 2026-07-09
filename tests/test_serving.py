@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from agent_kit.config import AgentKitConfig, ToolPolicy
-from agent_kit.serving.app import create_app
-from agent_kit.tools.base import Tool
+from harness_kit.config import HarnessKitConfig, ToolPolicy
+from harness_kit.serving.app import create_app
+from harness_kit.tools.base import Tool
 from llm_kit import ToolDefinition
 
 from tests.conftest import ScriptedTurn, make_service, tc
 
 
 def _client(turns, *, extra_tools=None, default_allowed=None) -> TestClient:
-    cfg = AgentKitConfig()
+    cfg = HarnessKitConfig()
     if default_allowed is not None:
         cfg.tools.default_allowed = default_allowed
     service, _ = make_service(cfg, turns=turns, extra_tools=extra_tools)
@@ -81,7 +81,7 @@ def _email_tool_serving(calls: list[str]) -> Tool:
 
 
 def _approval_client(turns, *, extra_tools=None, timeout_s: float = 5.0) -> TestClient:
-    cfg = AgentKitConfig()
+    cfg = HarnessKitConfig()
     cfg.tools.default_allowed = ["send_email"]
     cfg.tools.definitions = {
         "send_email": ToolPolicy(requires_approval=True, approval_timeout_s=timeout_s)

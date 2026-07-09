@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from agent_kit import metrics
-from agent_kit.config import AgentKitConfig
+from harness_kit import metrics
+from harness_kit.config import HarnessKitConfig
 
 from tests.conftest import ScriptedTurn, make_service, tc
 
@@ -122,7 +122,7 @@ def test_is_enabled_with_fake(fake_instruments):
 # --------------------------------------------------------------------------- #
 async def test_turn_instruments_called(fake_instruments):
     """A plain text turn: TTFT + turn latency + iterations + retrieval are recorded."""
-    cfg = AgentKitConfig()
+    cfg = HarnessKitConfig()
     service, _ = make_service(cfg, turns=[ScriptedTurn(text_chunks=["hello", " world"])])
 
     events = [e async for e in service.agent.run_turn("u1", "conv1", "hi")]
@@ -143,7 +143,7 @@ async def test_turn_instruments_called(fake_instruments):
 
 async def test_tool_call_outcome_recorded(fake_instruments):
     """A tool-call turn: tool_calls counter captures the tool name and outcome."""
-    cfg = AgentKitConfig()
+    cfg = HarnessKitConfig()
     cfg.tools.default_allowed = ["list_facts"]
     service, _ = make_service(
         cfg,
@@ -161,7 +161,7 @@ async def test_tool_call_outcome_recorded(fake_instruments):
 
 async def test_denied_tool_outcome_recorded(fake_instruments):
     """A denied tool call: tool_calls counter captures 'not_permitted' outcome."""
-    cfg = AgentKitConfig()
+    cfg = HarnessKitConfig()
     # list_facts is NOT in the allowlist — will be denied.
     service, _ = make_service(
         cfg,

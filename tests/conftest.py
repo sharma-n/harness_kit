@@ -17,8 +17,8 @@ from llm_kit.llm.response import TokenUsage
 from llm_kit.llm.streaming import StreamEvent
 from pydantic import BaseModel
 
-from agent_kit.config import AgentKitConfig
-from agent_kit.service import AgentService
+from harness_kit.config import HarnessKitConfig
+from harness_kit.service import AgentService
 
 
 class ScriptedTurn:
@@ -102,12 +102,12 @@ class FakeEmbedder:
 
 
 @pytest.fixture
-def base_config() -> AgentKitConfig:
-    return AgentKitConfig()  # all defaults → in-memory stores
+def base_config() -> HarnessKitConfig:
+    return HarnessKitConfig()  # all defaults → in-memory stores
 
 
 def make_service(
-    cfg: AgentKitConfig,
+    cfg: HarnessKitConfig,
     turns: list[ScriptedTurn] | None = None,
     *,
     invoke_parsed: BaseModel | None = None,

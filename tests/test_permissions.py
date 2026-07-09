@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from agent_kit.stores.memory_permissions import InMemoryPermissionStore
-from agent_kit.tools.base import Tool
-from agent_kit.tools.registry import ToolRegistry
+from harness_kit.stores.memory_permissions import InMemoryPermissionStore
+from harness_kit.tools.base import Tool
+from harness_kit.tools.registry import ToolRegistry
 from llm_kit import ToolCall, ToolDefinition
 
 

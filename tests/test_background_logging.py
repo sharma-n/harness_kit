@@ -13,9 +13,9 @@ import logging
 
 import pytest
 
-from agent_kit.config import AgentKitConfig
-from agent_kit.memory.factual import ExtractedFacts
-from agent_kit.stores.types import Turn
+from harness_kit.config import HarnessKitConfig
+from harness_kit.memory.factual import ExtractedFacts
+from harness_kit.stores.types import Turn
 
 from tests.conftest import ScriptedTurn, make_service
 from tests.test_memory_retry import FlakyProfileStore
@@ -26,7 +26,7 @@ def _no_sleep(monkeypatch):
     async def _instant(_delay):
         return None
 
-    monkeypatch.setattr("agent_kit.retry.asyncio.sleep", _instant)
+    monkeypatch.setattr("harness_kit.retry.asyncio.sleep", _instant)
 
 
 async def _run(agent, user="alice", convo="c1", msg="hi"):
@@ -36,7 +36,7 @@ async def _run(agent, user="alice", convo="c1", msg="hi"):
 
 
 async def test_choke_point_logs_one_error_on_exhausted_background_write(caplog):
-    base = AgentKitConfig()
+    base = HarnessKitConfig()
     service, _ = make_service(
         base,
         turns=[ScriptedTurn(text_chunks=["sure"])],
@@ -45,7 +45,7 @@ async def test_choke_point_logs_one_error_on_exhausted_background_write(caplog):
     # Make the factual store write fail permanently → extract exhausts its retries.
     service.agent._factual._store = FlakyProfileStore(fail_times=99)
 
-    with caplog.at_level(logging.ERROR, logger="agent_kit.agent.loop"):
+    with caplog.at_level(logging.ERROR, logger="harness_kit.agent.loop"):
         await _run(service.agent, msg="I'm vegetarian")
 
     errors = [r for r in caplog.records if r.levelno == logging.ERROR]
@@ -56,7 +56,7 @@ async def test_choke_point_logs_one_error_on_exhausted_background_write(caplog):
 
 
 async def test_sweep_idle_logs_failure_and_continues(caplog):
-    base = AgentKitConfig()
+    base = HarnessKitConfig()
     service, _ = make_service(
         base,
         turns=[ScriptedTurn(text_chunks=["one"]), ScriptedTurn(text_chunks=["two"])],
@@ -79,7 +79,7 @@ async def test_sweep_idle_logs_failure_and_continues(caplog):
 
     service.agent.end_conversation = flaky_end
 
-    with caplog.at_level(logging.WARNING, logger="agent_kit.agent.loop"):
+    with caplog.at_level(logging.WARNING, logger="harness_kit.agent.loop"):
         await service.agent.sweep_idle(idle_finalize_s=900)
 
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]

@@ -15,11 +15,11 @@ from typing import Any
 
 import pytest
 
-from agent_kit.config import AgentKitConfig
-from agent_kit.stores.memory_permissions import InMemoryPermissionStore
-from agent_kit.tools.base import Tool
-from agent_kit.tools.mcp import MCPManager, MCPServerClient, namespaced
-from agent_kit.tools.registry import ToolRegistry
+from harness_kit.config import HarnessKitConfig
+from harness_kit.stores.memory_permissions import InMemoryPermissionStore
+from harness_kit.tools.base import Tool
+from harness_kit.tools.mcp import MCPManager, MCPServerClient, namespaced
+from harness_kit.tools.registry import ToolRegistry
 from llm_kit import ToolCall
 
 from tests.conftest import ScriptedTurn, make_service, tc
@@ -169,7 +169,7 @@ async def test_manager_auto_allow_collects_namespaced_names():
 
 
 async def test_astart_auto_allow_makes_tool_callable_end_to_end():
-    cfg = AgentKitConfig()  # empty default_allowed
+    cfg = HarnessKitConfig()  # empty default_allowed
     mcp_tool = namespaced("trusted", "echo")
     turns = [
         ScriptedTurn(tool_calls=[tc("c1", mcp_tool, msg="hi")]),
@@ -192,7 +192,7 @@ async def test_astart_auto_allow_makes_tool_callable_end_to_end():
 
 
 async def test_astart_without_auto_allow_does_not_grant():
-    cfg = AgentKitConfig()
+    cfg = HarnessKitConfig()
     client = FakeMcpClient("guarded", ["danger"], auto_allow=False)
     service, _ = make_service(cfg, mcp_clients=[client])
     await service.astart()
@@ -205,7 +205,7 @@ async def test_astart_without_auto_allow_does_not_grant():
 
 
 async def test_mcp_tool_per_tool_timeout_marks_failure():
-    cfg = AgentKitConfig()
+    cfg = HarnessKitConfig()
     cfg.agent.per_tool_timeout_s = 0.05
     client = FakeMcpClient("slow", ["wait"], auto_allow=True, call_delay_s=1.0)
     service, _ = make_service(cfg, mcp_clients=[client])

@@ -2,8 +2,8 @@
 
 import pytest
 
-from agent_kit.util import BoundedLRUDict
-from agent_kit.tools.ratelimit import ToolRateLimiter
+from harness_kit.util import BoundedLRUDict
+from harness_kit.tools.ratelimit import ToolRateLimiter
 
 
 def test_bounded_lru_dict_max_size() -> None:

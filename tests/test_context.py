@@ -6,12 +6,12 @@ import pytest
 from llm_kit import Message, ToolDefinition
 from llm_kit.messages.types import Role
 
-from agent_kit.agent.budgeter import BudgetInputs, ContextBudgeter
-from agent_kit.agent.context import ContextBuilder
-from agent_kit.config import AgentConfig, ContextConfig
-from agent_kit.errors import ContextOverflowError
-from agent_kit.memory.working import WorkingSnapshot
-from agent_kit.stores.types import MemoryHit, MemoryPoint, Turn, UserProfile
+from harness_kit.agent.budgeter import BudgetInputs, ContextBudgeter
+from harness_kit.agent.context import ContextBuilder
+from harness_kit.config import AgentConfig, ContextConfig
+from harness_kit.errors import ContextOverflowError
+from harness_kit.memory.working import WorkingSnapshot
+from harness_kit.stores.types import MemoryHit, MemoryPoint, Turn, UserProfile
 
 
 # --------------------------------------------------------------- assembly golden

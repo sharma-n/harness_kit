@@ -7,66 +7,6 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "agent-kit"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "fastapi" },
-    { name = "llm-kit" },
-    { name = "numpy" },
-    { name = "pyyaml" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "websockets" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-mcp = [
-    { name = "mcp" },
-]
-metrics = [
-    { name = "prometheus-client" },
-]
-qdrant = [
-    { name = "qdrant-client" },
-]
-redis = [
-    { name = "redis" },
-]
-sqlite = [
-    { name = "aiosqlite" },
-    { name = "sqlalchemy" },
-]
-telemetry = [
-    { name = "langfuse" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiosqlite", marker = "extra == 'sqlite'" },
-    { name = "fastapi" },
-    { name = "httpx", marker = "extra == 'dev'" },
-    { name = "langfuse", marker = "extra == 'telemetry'" },
-    { name = "llm-kit", git = "https://github.com/sharma-n/llm_kit.git" },
-    { name = "mcp", marker = "extra == 'mcp'" },
-    { name = "numpy" },
-    { name = "prometheus-client", marker = "extra == 'metrics'" },
-    { name = "pytest", marker = "extra == 'dev'" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'" },
-    { name = "pyyaml" },
-    { name = "qdrant-client", marker = "extra == 'qdrant'" },
-    { name = "redis", marker = "extra == 'redis'" },
-    { name = "sqlalchemy", marker = "extra == 'sqlite'" },
-    { name = "uvicorn", extras = ["standard"] },
-    { name = "websockets" },
-]
-provides-extras = ["redis", "sqlite", "qdrant", "mcp", "telemetry", "metrics", "dev"]
-
-[[package]]
 name = "aiosqlite"
 version = "0.22.1"
 source = { registry = "https://pypi.org/simple" }
@@ -442,6 +382,66 @@ sdist = { url = "https://files.pythonhosted.org/packages/1d/17/afa56379f94ad0fe8
 wheels = [
     { url = "https://files.pythonhosted.org/packages/69/b2/119f6e6dcbd96f9069ce9a2665e0146588dc9f88f29549711853645e736a/h2-4.3.0-py3-none-any.whl", hash = "sha256:c438f029a25f7945c69e0ccf0fb951dc3f73a5f6412981daee861431b70e2bdd", size = 61779, upload-time = "2025-08-23T18:12:17.779Z" },
 ]
+
+[[package]]
+name = "harness-kit"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "fastapi" },
+    { name = "llm-kit" },
+    { name = "numpy" },
+    { name = "pyyaml" },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+mcp = [
+    { name = "mcp" },
+]
+metrics = [
+    { name = "prometheus-client" },
+]
+qdrant = [
+    { name = "qdrant-client" },
+]
+redis = [
+    { name = "redis" },
+]
+sqlite = [
+    { name = "aiosqlite" },
+    { name = "sqlalchemy" },
+]
+telemetry = [
+    { name = "langfuse" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiosqlite", marker = "extra == 'sqlite'" },
+    { name = "fastapi" },
+    { name = "httpx", marker = "extra == 'dev'" },
+    { name = "langfuse", marker = "extra == 'telemetry'" },
+    { name = "llm-kit", git = "https://github.com/sharma-n/llm_kit.git" },
+    { name = "mcp", marker = "extra == 'mcp'" },
+    { name = "numpy" },
+    { name = "prometheus-client", marker = "extra == 'metrics'" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'" },
+    { name = "pyyaml" },
+    { name = "qdrant-client", marker = "extra == 'qdrant'" },
+    { name = "redis", marker = "extra == 'redis'" },
+    { name = "sqlalchemy", marker = "extra == 'sqlite'" },
+    { name = "uvicorn", extras = ["standard"] },
+    { name = "websockets" },
+]
+provides-extras = ["redis", "sqlite", "qdrant", "mcp", "telemetry", "metrics", "dev"]
 
 [[package]]
 name = "hpack"

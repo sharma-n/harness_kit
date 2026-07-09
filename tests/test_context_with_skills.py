@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent_kit.agent.budgeter import ContextBudgeter
-from agent_kit.agent.context import ContextBuilder
-from agent_kit.config import AgentConfig, ContextConfig
-from agent_kit.memory.working import WorkingSnapshot
-from agent_kit.skills.loader import SkillMeta
-from agent_kit.skills.manager import SkillManager
-from agent_kit.stores.memory_skills import InMemorySkillStore
-from agent_kit.stores.types import Turn, UserProfile
+from harness_kit.agent.budgeter import ContextBudgeter
+from harness_kit.agent.context import ContextBuilder
+from harness_kit.config import AgentConfig, ContextConfig
+from harness_kit.memory.working import WorkingSnapshot
+from harness_kit.skills.loader import SkillMeta
+from harness_kit.skills.manager import SkillManager
+from harness_kit.stores.memory_skills import InMemorySkillStore
+from harness_kit.stores.types import Turn, UserProfile
 
 
 class _StubWorking:

@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from agent_kit.agent.events import (
+from harness_kit.agent.events import (
     TextDelta,
     ToolApprovalRequired,
     ToolCallStarted,
     ToolResult,
     TurnComplete,
 )
-from agent_kit.config import AgentConfig, AgentKitConfig, ToolPolicy
-from agent_kit.tools.base import Tool
+from harness_kit.config import AgentConfig, HarnessKitConfig, ToolPolicy
+from harness_kit.tools.base import Tool
 from llm_kit import ToolDefinition
 
 from tests.conftest import ScriptedTurn, make_service, tc

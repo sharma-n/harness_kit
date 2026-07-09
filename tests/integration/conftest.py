@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_kit.config import AgentKitConfig
-from agent_kit.service import AgentService
-from agent_kit.agent.events import AgentEvent
+from harness_kit.config import HarnessKitConfig
+from harness_kit.service import AgentService
+from harness_kit.agent.events import AgentEvent
 from tests.conftest import FakeEmbedder
 
 _LIVE_CONFIG_PATH = Path(__file__).parent.parent.parent / "config_live.yaml"
@@ -29,7 +29,7 @@ requires_live = pytest.mark.skipif(
 )
 
 
-def _load_live_cfg(**overrides: dict) -> AgentKitConfig:
+def _load_live_cfg(**overrides: dict) -> HarnessKitConfig:
     """Load config_live.yaml, apply shallow per-section overrides, return config."""
     import yaml
 
@@ -40,7 +40,7 @@ def _load_live_cfg(**overrides: dict) -> AgentKitConfig:
             data[section].update(values)
         else:
             data[section] = values
-    return AgentKitConfig.from_dict(data)
+    return HarnessKitConfig.from_dict(data)
 
 
 @pytest.fixture

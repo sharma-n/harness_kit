@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from agent_kit.service import AgentService
-from agent_kit.agent.events import TextDelta, ToolCallStarted
+from harness_kit.service import AgentService
+from harness_kit.agent.events import TextDelta, ToolCallStarted
 from tests.conftest import FakeEmbedder
 from tests.integration.conftest import requires_live, _load_live_cfg, run_turn
 

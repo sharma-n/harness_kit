@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_kit.skills.loader import discover, load_skill_dir, read_body
+from harness_kit.skills.loader import discover, load_skill_dir, read_body
 
 
 def _write_skill(base: Path, name: str, *, description: str = "A skill.", body: str = "Do the thing.", allowed_tools: str = "") -> Path:

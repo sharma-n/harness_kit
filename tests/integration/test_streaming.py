@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_kit.agent.events import TextDelta, TurnComplete
+from harness_kit.agent.events import TextDelta, TurnComplete
 
 from tests.integration.conftest import requires_live, run_turn
 

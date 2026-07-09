@@ -1,4 +1,4 @@
-# ROADMAP — `agent_kit`
+# ROADMAP — `harness_kit`
 
 Status of the build against [SPEC.md](SPEC.md)'s milestones (§14). The first pass
 delivered a **runnable vertical slice** (in-memory stores, streaming loop, context
@@ -12,7 +12,7 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
 
 ### ✅ M1 — Skeleton + config + store Protocols
 - `src/` layout, `uv` project, deps + optional extras (redis/sqlite/qdrant/mcp/dev).
-- `config/`: `AgentKitConfig` dataclass tree + YAML loader with `${VAR}`
+- `config/`: `HarnessKitConfig` dataclass tree + YAML loader with `${VAR}`
   interpolation; nested `llm_kit` block delegated to `AppConfig.from_dict`.
 - `stores/base.py`: `SessionStore`, `ProfileStore`, `VectorStore`, `PermissionStore`
   Protocols. `errors.py` hierarchy.
@@ -156,9 +156,9 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
   total) are stamped on each, so Langfuse prices per trace/user/conversation from its
   model tables — no separate `UsageLedger` wiring needed for the common path.
 - **Metrics pillar.** Prometheus `/metrics` via `prometheus_client` (optional `metrics`
-  extra). Five instruments: `agent_kit_ttft_seconds` (Histogram), `agent_kit_turn_latency_seconds`
-  (Histogram), `agent_kit_turn_iterations` (Histogram), `agent_kit_tool_calls_total`
-  (Counter, labels `tool`+`outcome`), `agent_kit_retrieval_hits` (Histogram). Same seam
+  extra). Five instruments: `harness_kit_ttft_seconds` (Histogram), `harness_kit_turn_latency_seconds`
+  (Histogram), `harness_kit_turn_iterations` (Histogram), `harness_kit_tool_calls_total`
+  (Counter, labels `tool`+`outcome`), `harness_kit_retrieval_hits` (Histogram). Same seam
   pattern as `telemetry.py`: single `metrics.py` leaf, no-op by default
   (`MetricsConfig.enabled=false`), `_set_instruments_for_test` for offline tests.
   `/metrics` returns 501 JSON when disabled, Prometheus text format when enabled.
@@ -180,7 +180,7 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
 - `SkillStore` Protocol (`stores/base.py`) + `InMemorySkillStore`: per-user skill
   visibility grants. `allowed_skills()` returns `None` → all skills globally visible
   (v1 default). Built-out now so v2 per-user grants require only a new adapter.
-- `SkillsConfig.paths` in `AgentKitConfig`: directories to scan at startup (sync
+- `SkillsConfig.paths` in `HarnessKitConfig`: directories to scan at startup (sync
   filesystem I/O in `AgentService.build()`, safe without async).
 - `read_skill(name)` native tool (`tools/skill_tools.py`): agent-driven progressive
   disclosure. Permission is re-checked at execution time (defense-in-depth).
@@ -242,8 +242,8 @@ Legend: ✅ done · 🟡 partial / scaffolded · ⬜ not started
 
 **CLI** (`jobs/__main__.py`):
 ```
-python -m agent_kit.jobs dedup        --config config.yaml --users alice,bob
-python -m agent_kit.jobs resummarize  --config config.yaml --users alice,bob
+python -m harness_kit.jobs dedup        --config config.yaml --users alice,bob
+python -m harness_kit.jobs resummarize  --config config.yaml --users alice,bob
 ```
 
 **`forget_memory` tool** (`tools/native.py`):
@@ -254,7 +254,7 @@ python -m agent_kit.jobs resummarize  --config config.yaml --users alice,bob
   specific conversation.
 - Seeded into default allowlist; `requires_approval: true` set in `config.yaml` (HITL gate).
 
-**Config:** `jobs: JobsConfig` added to `AgentKitConfig` (both `deduplication` and `resummarization` sub-blocks).
+**Config:** `jobs: JobsConfig` added to `HarnessKitConfig` (both `deduplication` and `resummarization` sub-blocks).
 
 ### ✅ Live / integration testing
 `tests/integration/` — opt-in suite (skipped unless `LIVE_TESTS_ENABLED=1`).
@@ -280,12 +280,12 @@ is needed. Seven coverage areas verified with a real LLM:
 ### ⬜ Per-turn tool-subset selection (§6.3) — scaling guard, adoption-gated
 Today the model is offered **every** allowed tool, every iteration. SPEC §6.3 warns
 this degrades at scale — 100 MCP tools per turn burns tokens and hurts selection. But
-it's **latent, not a missing feature**: agent_kit ships 4 native tools and zero
+it's **latent, not a missing feature**: harness_kit ships 4 native tools and zero
 bundled MCP tools, so the count is whatever an operator wires up. It only bites a
 deployment that connects several fat servers. Hence: build it as an opt-in guard that
 is **inert until tool counts are large**, never an always-on pipeline stage.
 
-The governing constraint is agent_kit's identity — **TTFT/latency**. Selection runs
+The governing constraint is harness_kit's identity — **TTFT/latency**. Selection runs
 *before* the first token, so nothing here may add a synchronous round-trip in front of
 the first LLM call. That rules out an LLM router (two-pass) and reshapes the rest.
 

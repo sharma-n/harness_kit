@@ -1,4 +1,4 @@
-# agent_kit example config. One global file for all users; memory and tool
+# harness_kit example config. One global file for all users; memory and tool
 # permissions are per-user and live in the stores, never here.
 
 agent:
@@ -63,7 +63,7 @@ stores:
   redis:
     url: ${REDIS_URL:-redis://localhost:6379/0}
   sqlite:
-    url: ${SQLITE_URL:-sqlite+aiosqlite:///agent_kit.db}
+    url: ${SQLITE_URL:-sqlite+aiosqlite:///harness_kit.db}
   qdrant:
     mode: ${QDRANT_MODE:-host}   # memory | file | host
     path: ${QDRANT_PATH:-qdrant_data}
@@ -111,8 +111,8 @@ tools:
     #   rate_limit_per_minute: 30  # cap a high-volume tool per user
 
 # Offline memory maintenance jobs (M8). Run with:
-#   python -m agent_kit.jobs dedup        --config config.yaml --users alice,bob
-#   python -m agent_kit.jobs resummarize  --config config.yaml --users alice,bob
+#   python -m harness_kit.jobs dedup        --config config.yaml --users alice,bob
+#   python -m harness_kit.jobs resummarize  --config config.yaml --users alice,bob
 jobs:
   deduplication:
     # Cosine similarity threshold for merging conversation points. 0.92 = tight
@@ -132,7 +132,7 @@ jobs:
 # here. Install with the `telemetry` extra (uv sync --extra telemetry).
 telemetry:
   enabled: ${LANGFUSE_ENABLED:-false}
-  service_name: agent_kit
+  service_name: harness_kit
   sample_rate: 1.0
   environment: ${LANGFUSE_ENVIRONMENT:-}
   release: ${LANGFUSE_RELEASE:-}

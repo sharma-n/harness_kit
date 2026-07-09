@@ -185,7 +185,7 @@ stores:
   redis:
     url: ${REDIS_URL:-redis://localhost:6379/0}
   sqlite:
-    url: ${SQLITE_URL:-sqlite+aiosqlite:///agent_kit.db}
+    url: ${SQLITE_URL:-sqlite+aiosqlite:///harness_kit.db}
   qdrant:
     mode: ${QDRANT_MODE:-host}
     path: ${QDRANT_PATH:-qdrant_data}
@@ -353,7 +353,7 @@ Clusters near-identical episodic points (via cosine similarity + Union-Find) and
 | `max_points_per_user` | int | 10000 | Per-user cap on points processed. Limits job scope. |
 | `worker_concurrency` | int | 8 | Number of concurrent LLM calls during merging. |
 
-**Run:** `python -m agent_kit.jobs dedup --config config.yaml --users alice,bob`
+**Run:** `python -m harness_kit.jobs dedup --config config.yaml --users alice,bob`
 
 ### `resummarization` — Refresh Old Summaries
 
@@ -365,7 +365,7 @@ Refreshes and re-embeds episodic points older than `min_age_days`.
 | `max_points_per_user` | int | 500 | Per-user cap on points processed. |
 | `worker_concurrency` | int | 8 | Number of concurrent LLM calls during re-summarization. |
 
-**Run:** `python -m agent_kit.jobs resummarize --config config.yaml --users alice,bob`
+**Run:** `python -m harness_kit.jobs resummarize --config config.yaml --users alice,bob`
 
 ---
 
@@ -376,7 +376,7 @@ Integrates Langfuse (built on OpenTelemetry) for tracing and observability.
 ```yaml
 telemetry:
   enabled: ${LANGFUSE_ENABLED:-false}
-  service_name: agent_kit
+  service_name: harness_kit
   sample_rate: 1.0
   environment: ${LANGFUSE_ENVIRONMENT:-}
   release: ${LANGFUSE_RELEASE:-}
@@ -385,7 +385,7 @@ telemetry:
 | Field | Type | Default | Purpose |
 |-------|------|---------|---------|
 | `enabled` | bool | false | Master switch. If false, no traces are recorded (no-op). |
-| `service_name` | string | "agent_kit" | Service identifier in Langfuse. |
+| `service_name` | string | "harness_kit" | Service identifier in Langfuse. |
 | `sample_rate` | float | 1.0 | Head sampling ratio (0–1). 1.0 = trace every turn; 0.1 = trace ~10%. |
 | `environment` | string | "" | Environment tag (e.g., "production", "staging") surfaced in Langfuse. |
 | `release` | string | "" | Release tag (e.g., "v1.2.3") surfaced in Langfuse. |
@@ -417,11 +417,11 @@ metrics:
 | `enabled` | bool | false | Master switch. If false, `GET /metrics` returns 501; if true, returns Prometheus text format. |
 
 **Instruments exported:**
-- `agent_kit_ttft_seconds` — Time to first token (histogram).
-- `agent_kit_turn_latency_seconds` — Total turn latency (histogram).
-- `agent_kit_turn_iterations` — Tool iterations per turn (histogram).
-- `agent_kit_tool_calls_total` — Tool calls with outcome labels (counter). Labels: `tool`, `outcome` (ok / not_permitted / rate_limited / timeout / error).
-- `agent_kit_retrieval_hits` — Episodic retrieval hit count (histogram).
+- `harness_kit_ttft_seconds` — Time to first token (histogram).
+- `harness_kit_turn_latency_seconds` — Total turn latency (histogram).
+- `harness_kit_turn_iterations` — Tool iterations per turn (histogram).
+- `harness_kit_tool_calls_total` — Tool calls with outcome labels (counter). Labels: `tool`, `outcome` (ok / not_permitted / rate_limited / timeout / error).
+- `harness_kit_retrieval_hits` — Episodic retrieval hit count (histogram).
 
 ---
 
@@ -501,7 +501,7 @@ llm_kit:
     model: ${LLM_MODEL:-claude-haiku-4-5-20251001}  # or default
 stores:
   sqlite:
-    url: ${SQLITE_URL:-sqlite+aiosqlite:///agent_kit.db}
+    url: ${SQLITE_URL:-sqlite+aiosqlite:///harness_kit.db}
 ```
 
 ---

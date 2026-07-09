@@ -1,8 +1,8 @@
-"""Minimal websocket client for a running agent_kit server.
+"""Minimal websocket client for a running harness_kit server.
 
 Start the server:
     OPENAI_API_KEY=... uv run uvicorn \
-        "agent_kit.serving.app:create_app_from_yaml" --factory
+        "harness_kit.serving.app:create_app_from_yaml" --factory
 
 Then in another shell:
     uv run python examples/ws_client.py

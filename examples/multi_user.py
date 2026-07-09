@@ -37,8 +37,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
-from agent_kit.agent.events import TextDelta, ToolCallStarted, ToolResult, TurnComplete
-from agent_kit.service import AgentService
+from harness_kit.agent.events import TextDelta, ToolCallStarted, ToolResult, TurnComplete
+from harness_kit.service import AgentService
 
 # A lock so concurrent users don't garble the console. Each turn's output is buffered
 # and printed as one labeled block — the turns still run concurrently; only the final

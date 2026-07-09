@@ -1,4 +1,4 @@
-# agent_kit
+# harness_kit
 
 A production-shaped, **multi-tenant agentic chatbot service** — streaming, stateful,
 multi-turn, with memory, tool use, and per-user isolation baked in at every layer.
@@ -11,7 +11,7 @@ session ownership, context budgeting — assumes multiple users from the start.
 
 ## When to reach for this
 
-| You need | agent_kit gives you |
+| You need | harness_kit gives you |
 |---|---|
 | Persistent, resumable conversations per user | Session store with two-stage TTL (finalize → evict) |
 | Memory that survives across conversations | Episodic (vector) + factual (profile) stores, per-user |
@@ -92,7 +92,7 @@ OPENAI_API_KEY=sk-... uv run python examples/single_turn.py
 Or start the server and connect the WebSocket client:
 
 ```bash
-OPENAI_API_KEY=sk-... uv run uvicorn "agent_kit.serving.app:create_app_from_yaml" --factory
+OPENAI_API_KEY=sk-... uv run uvicorn "harness_kit.serving.app:create_app_from_yaml" --factory
 # in another terminal:
 uv run python examples/ws_client.py
 ```
@@ -172,7 +172,7 @@ These aren't configurable — they're the point of the library:
 ## Layout
 
 ```
-src/agent_kit/
+src/harness_kit/
   config/    schema.py (dataclass tree) + loader.py (YAML + ${VAR})
   stores/    4 Protocols + in-memory adapters + real-backend stubs + factory
   memory/    working.py · episodic.py · factual.py
@@ -196,7 +196,7 @@ Current status and roadmap: [ROADMAP.md](ROADMAP.md).
 
 [`llm_kit`](https://github.com/sharma-n/llm_kit) — provider wire formats, streaming
 `invoke_stream`, structured `invoke`, embedder, rate limiting, retries, and the error
-hierarchy. `agent_kit` adds state, memory, and the tool loop on top; it does not
+hierarchy. `harness_kit` adds state, memory, and the tool loop on top; it does not
 reimplement anything `llm_kit` already owns.
 
 ---

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import asyncio
 
-from agent_kit.agent.events import TextDelta, ToolCallStarted, ToolResult, TurnComplete
-from agent_kit.service import AgentService
+from harness_kit.agent.events import TextDelta, ToolCallStarted, ToolResult, TurnComplete
+from harness_kit.service import AgentService
 
 USER_ID = "demo-user"
 CONVERSATION_ID = "demo-conversation"

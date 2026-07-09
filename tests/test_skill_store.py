@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_kit.stores.memory_skills import InMemorySkillStore
+from harness_kit.stores.memory_skills import InMemorySkillStore
 
 
 @pytest.fixture

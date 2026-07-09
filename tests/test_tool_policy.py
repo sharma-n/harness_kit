@@ -10,10 +10,10 @@ import asyncio
 
 from llm_kit import ToolCall, ToolDefinition
 
-from agent_kit.config import ToolPolicy
-from agent_kit.stores.memory_permissions import InMemoryPermissionStore
-from agent_kit.tools.base import Tool
-from agent_kit.tools.registry import ToolRegistry
+from harness_kit.config import ToolPolicy
+from harness_kit.stores.memory_permissions import InMemoryPermissionStore
+from harness_kit.tools.base import Tool
+from harness_kit.tools.registry import ToolRegistry
 
 
 def _tool(name: str, handler) -> Tool:

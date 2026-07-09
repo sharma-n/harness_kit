@@ -10,16 +10,16 @@ from __future__ import annotations
 
 import pytest
 
-from agent_kit.config import EpisodicMemoryConfig, FactualMemoryConfig, WorkingMemoryConfig
-from agent_kit.errors import StoreWriteError
-from agent_kit.memory.episodic import EpisodicMemory
-from agent_kit.memory.factual import ExtractedFacts, FactualMemory
-from agent_kit.memory.working import RolledSummary, WorkingMemory
-from agent_kit.retry import RetryPolicy
-from agent_kit.stores.memory_profile import InMemoryProfileStore
-from agent_kit.stores.memory_session import InMemorySessionStore
-from agent_kit.stores.memory_vectors import InMemoryVectorStore
-from agent_kit.stores.types import SessionState, Turn
+from harness_kit.config import EpisodicMemoryConfig, FactualMemoryConfig, WorkingMemoryConfig
+from harness_kit.errors import StoreWriteError
+from harness_kit.memory.episodic import EpisodicMemory
+from harness_kit.memory.factual import ExtractedFacts, FactualMemory
+from harness_kit.memory.working import RolledSummary, WorkingMemory
+from harness_kit.retry import RetryPolicy
+from harness_kit.stores.memory_profile import InMemoryProfileStore
+from harness_kit.stores.memory_session import InMemorySessionStore
+from harness_kit.stores.memory_vectors import InMemoryVectorStore
+from harness_kit.stores.types import SessionState, Turn
 
 from tests.conftest import FakeEmbedder, FakeLLM
 
@@ -31,7 +31,7 @@ def _no_sleep(monkeypatch):
     async def _instant(_delay):
         return None
 
-    monkeypatch.setattr("agent_kit.retry.asyncio.sleep", _instant)
+    monkeypatch.setattr("harness_kit.retry.asyncio.sleep", _instant)
 
 
 # ------------------------------------------------------------- counting doubles

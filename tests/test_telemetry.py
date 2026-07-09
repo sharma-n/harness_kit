@@ -13,9 +13,9 @@ from __future__ import annotations
 import pytest
 from llm_kit import Message
 
-from agent_kit import telemetry
-from agent_kit.config import AgentKitConfig
-from agent_kit.llm import TracingEmbedder, TracingLLM
+from harness_kit import telemetry
+from harness_kit.config import HarnessKitConfig
+from harness_kit.llm import TracingEmbedder, TracingLLM
 
 from tests.conftest import FakeEmbedder, FakeLLM, ScriptedTurn, make_service, tc
 
@@ -161,7 +161,7 @@ async def test_tracing_embedder_passthrough_when_disabled():
 # Enabled posture — span tree for one scripted turn + conversation end
 # --------------------------------------------------------------------------- #
 async def test_turn_span_tree(recorder: Recorder):
-    cfg = AgentKitConfig()
+    cfg = HarnessKitConfig()
     cfg.tools.default_allowed = ["list_facts"]
     # tool-call turn (list_facts now allowed), then the answer turn.
     service, _ = make_service(
@@ -220,11 +220,11 @@ async def test_turn_span_tree(recorder: Recorder):
 def test_loader_coerces_env_bool():
     # ``${VAR:-false}`` interpolates to the string "false"; without coercion it would
     # be truthy. Confirm the loader turns it into a real bool for the enabled flag.
-    from agent_kit.config import TelemetryConfig
-    from agent_kit.config.loader import _coerce
+    from harness_kit.config import TelemetryConfig
+    from harness_kit.config.loader import _coerce
 
     assert _coerce(bool, "false") is False
     assert _coerce(bool, "true") is True
-    cfg = AgentKitConfig.from_dict({"telemetry": {"enabled": "false"}})
+    cfg = HarnessKitConfig.from_dict({"telemetry": {"enabled": "false"}})
     assert cfg.telemetry.enabled is False
     assert isinstance(cfg.telemetry, TelemetryConfig)

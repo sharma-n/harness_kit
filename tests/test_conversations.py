@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from agent_kit.config import AgentKitConfig
-from agent_kit.serving.app import create_app
-from agent_kit.stores.memory_session import InMemorySessionStore
-from agent_kit.stores.types import SessionState, Turn
+from harness_kit.config import HarnessKitConfig
+from harness_kit.serving.app import create_app
+from harness_kit.stores.memory_session import InMemorySessionStore
+from harness_kit.stores.types import SessionState, Turn
 
 from tests.conftest import ScriptedTurn, make_service
 
@@ -67,7 +67,7 @@ async def test_list_skips_ttl_expired_sessions_without_evicting():
 
 
 def _client(turns) -> TestClient:
-    service, _ = make_service(AgentKitConfig(), turns=turns)
+    service, _ = make_service(HarnessKitConfig(), turns=turns)
     return TestClient(create_app(service))
 
 

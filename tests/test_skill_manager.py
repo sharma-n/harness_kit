@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_kit.skills.loader import SkillMeta
-from agent_kit.skills.manager import SkillManager
+from harness_kit.skills.loader import SkillMeta
+from harness_kit.skills.manager import SkillManager
 
 
 def _meta(name: str, description: str, body: str, tmp_path: Path) -> SkillMeta:

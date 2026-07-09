@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from agent_kit.errors import UnauthorizedError
-from agent_kit.stores.memory_permissions import InMemoryPermissionStore
-from agent_kit.stores.memory_profile import InMemoryProfileStore
-from agent_kit.stores.memory_session import InMemorySessionStore
-from agent_kit.stores.memory_vectors import InMemoryVectorStore
-from agent_kit.stores.types import MemoryPoint, SessionState, Turn
+from harness_kit.errors import UnauthorizedError
+from harness_kit.stores.memory_permissions import InMemoryPermissionStore
+from harness_kit.stores.memory_profile import InMemoryProfileStore
+from harness_kit.stores.memory_session import InMemorySessionStore
+from harness_kit.stores.memory_vectors import InMemoryVectorStore
+from harness_kit.stores.types import MemoryPoint, SessionState, Turn
 
 
 async def test_session_roundtrip_and_append():

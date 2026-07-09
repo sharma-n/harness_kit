@@ -7,11 +7,11 @@ Covers the two design decisions in ROADMAP/CLAUDE:
 
 from __future__ import annotations
 
-from agent_kit.config import AgentKitConfig, EpisodicMemoryConfig, MemoryConfig, WorkingMemoryConfig
-from agent_kit.memory.episodic import FlaggedMoment, FlaggedMoments
-from agent_kit.memory.working import RolledSummary, WorkingMemory
-from agent_kit.stores.memory_session import InMemorySessionStore
-from agent_kit.stores.types import SessionState, Turn
+from harness_kit.config import HarnessKitConfig, EpisodicMemoryConfig, MemoryConfig, WorkingMemoryConfig
+from harness_kit.memory.episodic import FlaggedMoment, FlaggedMoments
+from harness_kit.memory.working import RolledSummary, WorkingMemory
+from harness_kit.stores.memory_session import InMemorySessionStore
+from harness_kit.stores.types import SessionState, Turn
 
 from tests.conftest import FakeLLM, ScriptedTurn, make_service
 
@@ -87,7 +87,7 @@ async def _run(agent, user="alice", convo="c1", msg="hi"):
 
 
 async def test_no_episodic_point_written_per_turn():
-    base = AgentKitConfig()
+    base = HarnessKitConfig()
     service, _ = make_service(
         base, turns=[ScriptedTurn(text_chunks=["one"]), ScriptedTurn(text_chunks=["two"])]
     )
@@ -98,7 +98,7 @@ async def test_no_episodic_point_written_per_turn():
 
 
 async def test_end_conversation_writes_exactly_one_point():
-    base = AgentKitConfig()
+    base = HarnessKitConfig()
     service, _ = make_service(
         base, turns=[ScriptedTurn(text_chunks=["hello there"])]
     )
@@ -118,7 +118,7 @@ async def test_end_conversation_writes_exactly_one_point():
 
 
 async def test_end_conversation_for_non_owner_is_noop():
-    base = AgentKitConfig()
+    base = HarnessKitConfig()
     service, _ = make_service(base, turns=[ScriptedTurn(text_chunks=["hi"])])
     await _run(service.agent, user="alice", convo="c1", msg="hello")
 
@@ -130,7 +130,7 @@ async def test_end_conversation_for_non_owner_is_noop():
 
 async def test_end_conversation_is_idempotent():
     """Finalizing twice (e.g. WS disconnect then a sweeper pass) writes one point."""
-    base = AgentKitConfig()
+    base = HarnessKitConfig()
     service, _ = make_service(base, turns=[ScriptedTurn(text_chunks=["hello"])])
     await _run(service.agent, msg="hi there")
 
@@ -178,7 +178,7 @@ async def test_new_activity_clears_finalized_mark():
 
 async def test_sweep_idle_finalizes_idle_sse_conversation():
     """The sweeper gives SSE (no disconnect) a conversation-end signal."""
-    base = AgentKitConfig()
+    base = HarnessKitConfig()
     service, _ = make_service(base, turns=[ScriptedTurn(text_chunks=["welcome"])])
     await _run(service.agent, msg="remember I'm vegetarian")
 
@@ -199,9 +199,9 @@ async def test_sweep_idle_finalizes_idle_sse_conversation():
 # ---------------------------------------------------- flagged moments (episodic)
 
 
-def _moments_cfg(n: int = 2) -> AgentKitConfig:
+def _moments_cfg(n: int = 2) -> HarnessKitConfig:
     """Config with flagged moments enabled and a large token budget (no rollover)."""
-    return AgentKitConfig(
+    return HarnessKitConfig(
         memory=MemoryConfig(
             episodic=EpisodicMemoryConfig(
                 flagged_moments_enabled=True,
@@ -215,7 +215,7 @@ def _moments_cfg(n: int = 2) -> AgentKitConfig:
 async def test_flagged_moments_disabled_writes_one_point():
     """Default config (moments off) still writes exactly one conv: point."""
     service, _ = make_service(
-        AgentKitConfig(), turns=[ScriptedTurn(text_chunks=["hi"])]
+        HarnessKitConfig(), turns=[ScriptedTurn(text_chunks=["hi"])]
     )
     await _run(service.agent, msg="planning a trip to Japan")
     await service.agent.end_conversation("alice", "c1")
@@ -260,8 +260,8 @@ async def test_flagged_moments_writes_conv_plus_moment_points():
 
 async def test_flagged_moments_noop_without_llm():
     """moments enabled but no LLM → safe no-op, only conv: point written."""
-    from agent_kit.memory.episodic import EpisodicMemory
-    from agent_kit.stores.memory_vectors import InMemoryVectorStore
+    from harness_kit.memory.episodic import EpisodicMemory
+    from harness_kit.stores.memory_vectors import InMemoryVectorStore
     from tests.conftest import FakeEmbedder
 
     store = InMemoryVectorStore()
@@ -312,7 +312,7 @@ async def test_flagged_moments_idempotent_on_refinalize():
 async def test_resume_after_finalize_keeps_same_conversation():
     """Coming back before ttl_s eviction continues the same conversation, and a
     later finalize upserts the single per-conversation point (no duplicate)."""
-    base = AgentKitConfig()
+    base = HarnessKitConfig()
     service, _ = make_service(
         base, turns=[ScriptedTurn(text_chunks=["one"]), ScriptedTurn(text_chunks=["two"])]
     )

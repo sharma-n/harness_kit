@@ -1,4 +1,4 @@
-# CLAUDE.md — orientation for `agent_kit`
+# CLAUDE.md — orientation for `harness_kit`
 
 Read this first. It explains what this repo is, how it's structured, the rules that
 keep it coherent, and how to run things. The full design rationale lives in
@@ -9,11 +9,11 @@ keep it coherent, and how to run things. The full design rationale lives in
 A stateful, multi-turn **agentic chatbot service** built **on top of**
 [`llm_kit`](https://github.com/sharma-n/llm_kit) (a git dependency). `llm_kit` owns
 provider wire formats, streaming `invoke_stream`, structured `invoke`, the embedder,
-rate limiting, retries, and the error hierarchy. `agent_kit` adds the three things
+rate limiting, retries, and the error hierarchy. `harness_kit` adds the three things
 `llm_kit` deliberately omits: **conversation state, memory, and a tool-calling agent
 loop**, plus a serving layer.
 
-`agent_kit` optimizes for the *opposite* of `llm_kit`: long-lived sessions, latency
+`harness_kit` optimizes for the *opposite* of `llm_kit`: long-lived sessions, latency
 (time-to-first-token), per-user state — not batch throughput.
 
 ## The non-negotiable rule: strict bottom-up layering
@@ -26,7 +26,7 @@ config → stores → (skills || tools) → agent → serving
 
 `skills/` and `tools/` sit at the same level — neither imports from the other.
 `service.py` is the composition root (top) that wires everything from config.
-`agent_kit/llm.py` holds thin `LLM` / `Embedder` Protocols over `llm_kit` so every
+`harness_kit/llm.py` holds thin `LLM` / `Embedder` Protocols over `llm_kit` so every
 layer above depends on the Protocol, not the concrete client — that's what lets the
 whole stack run against a `FakeLLM` in tests.
 
@@ -64,7 +64,7 @@ the real (Redis/SQLite/Qdrant) adapters drop in behind the identical Protocol.
 ## Map of the code
 
 ```
-src/agent_kit/
+src/harness_kit/
   config/      schema.py (dataclass tree) + loader.py (YAML + ${VAR}; nested llm_kit block)
   stores/      base.py (5 Protocols incl. SkillStore) · types.py (records)
                · memory_*.py (in-memory adapters) · stubs.py (real adapters, NotImplementedError)
@@ -80,17 +80,17 @@ src/agent_kit/
                · loop.py (run_turn §5 + end_conversation)
   jobs/        _base.py (load_all_user_points) · dedup.py (EpisodicDeduplicator, cosine+Union-Find
                clustering, llm_kit batch merge) · resummarize.py (EpisodicResummarizer, llm_kit
-               batch re-summarize + embed) · __main__.py (CLI: python -m agent_kit.jobs)
+               batch re-summarize + embed) · __main__.py (CLI: python -m harness_kit.jobs)
   serving/     wire.py (AgentEvent→frame) · app.py (FastAPI ws + sse)
   service.py   composition root: config → stores → skills → tools → agent
   llm.py       LLM / Embedder Protocols over llm_kit
   tokens.py    estimate_tokens — leaf estimator shared by memory/ rollover + agent/ budgeter
   retry.py     retry_async / store_write — exp backoff + jitter for store-write retries
   telemetry.py vendor-neutral tracing seam over Langfuse (the only langfuse import) — leaf
-  errors.py    AgentKitError hierarchy (reuse llm_kit.LLMError for provider failures)
+  errors.py    HarnessKitError hierarchy (reuse llm_kit.LLMError for provider failures)
 examples/      single_turn.py (direct) · ws_client.py (over server)
 tests/         conftest.py (FakeLLM/FakeEmbedder + make_service) + per-layer tests
-config.yaml    one global config; agent_kit sections + nested llm_kit block
+config.yaml    one global config; harness_kit sections + nested llm_kit block
 ```
 
 ## Key abstractions to know
@@ -101,7 +101,7 @@ config.yaml    one global config; agent_kit sections + nested llm_kit block
   — a streaming tool loop can't yield bare tokens.
 - **The loop drives tools off `StreamEnd.response.tool_calls`.** `llm_kit`'s
   mid-stream `ToolCallStarted` is *name-only*; the assembled calls *with parsed
-  arguments* arrive on `StreamEnd`. agent_kit emits its own `ToolCallStarted` (with
+  arguments* arrive on `StreamEnd`. harness_kit emits its own `ToolCallStarted` (with
   args) at execution time.
 - **Tool errors are observations, not exceptions.** A failed/denied/timed-out tool
   becomes `ToolResult(ok=False)` fed back to the model (SPEC §5). The only things
@@ -239,7 +239,7 @@ only stores grant metadata (who can see which skills).
 - `TokenUsage` is **not** re-exported from top-level `llm_kit`; import from
   `llm_kit.llm.response`.
 - `AppConfig.from_dict` / `from_yaml` **reject unknown keys** — that's why
-  agent_kit's config nests the `llm_kit` block rather than appending sections.
+  harness_kit's config nests the `llm_kit` block rather than appending sections.
 - `LLMClient` and `OpenAICompatibleEmbedder` both accept `client=` and
   `owns_client=` — `service.py` builds one shared `httpx.AsyncClient` for both.
 
@@ -255,7 +255,7 @@ only stores grant metadata (who can see which skills).
   `call_tool()`. A tool's `inputSchema` is already JSON Schema → drops straight into
   `ToolDefinition.parameters`.
 - `call_tool` returns a `CallToolResult` with `content` (text blocks) and `isError`.
-  agent_kit **raises** on `isError=True` so the registry yields `ToolResult(ok=False)`
+  harness_kit **raises** on `isError=True` so the registry yields `ToolResult(ok=False)`
   (tool errors are observations, not exceptions).
 - MCP connect/discover is async, so it can't run in the **sync** `service.build()`;
   it runs in `AgentService.astart()` (called from the serving lifespan / examples).
@@ -363,9 +363,9 @@ Omit `model` (or pass `null`) to clear. Returns `{"conversation_id": …, "model
   `TextChunk` straight through (TTFT) and uses `start_observation`/`end()` (not a
   context manager held across `yield`s, which would shuffle the OTel current-span var).
 - **Prometheus `/metrics`** — five instruments via `prometheus_client` (optional `metrics`
-  extra): `agent_kit_ttft_seconds`, `agent_kit_turn_latency_seconds`,
-  `agent_kit_turn_iterations`, `agent_kit_tool_calls_total` (labels `tool`+`outcome`),
-  `agent_kit_retrieval_hits`. Same seam pattern as `telemetry.py`: single `metrics.py`
+  extra): `harness_kit_ttft_seconds`, `harness_kit_turn_latency_seconds`,
+  `harness_kit_turn_iterations`, `harness_kit_tool_calls_total` (labels `tool`+`outcome`),
+  `harness_kit_retrieval_hits`. Same seam pattern as `telemetry.py`: single `metrics.py`
   leaf, no-op by default (`MetricsConfig.enabled=false`). `/metrics` returns 501 JSON
   when disabled, Prometheus text format when enabled.
 
@@ -375,7 +375,7 @@ Omit `model` (or pass `null`) to clear. Returns `{"conversation_id": …, "model
 uv sync --extra dev --extra mcp --extra telemetry   # use --native-tls on this machine
 uv run pytest                       # unit tests only, no network/Docker
 ANTHROPIC_API_KEY=... uv run python examples/single_turn.py
-ANTHROPIC_API_KEY=... uv run uvicorn "agent_kit.serving.app:create_app_from_yaml" --factory
+ANTHROPIC_API_KEY=... uv run uvicorn "harness_kit.serving.app:create_app_from_yaml" --factory
 ```
 
 Note: `uv` on this Windows box needs `--native-tls` or it fails with a cert error.
@@ -417,7 +417,7 @@ opt-in, key-gated suite). Keep new unit tests network-free.
   the *exact* assembled message list — if you change assembly order or block
   formatting, update it deliberately.
 - Keep the layering. Keep it async. Keep it user-scoped.
-- **If you change the config structure** (add/remove/rename fields in `src/agent_kit/config/schema.py`),
+- **If you change the config structure** (add/remove/rename fields in `src/harness_kit/config/schema.py`),
   update [docs/config.md](docs/config.md) with the new field(s), including type, default, and purpose.
   This keeps the operator-facing documentation in sync with the code.
 - Update [ROADMAP.md](ROADMAP.md) when you complete or start a milestone.

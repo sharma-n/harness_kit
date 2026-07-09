@@ -163,17 +163,17 @@ When a conversation ends, `Agent.end_conversation()` reads the rolling summary +
 
 | Stage | File |
 |---|---|
-| Startup wiring (composition root, `astart`/`aclose`) | `src/agent_kit/service.py` |
-| Entry point (WS/SSE) + lifespan (MCP connect, idle sweep) | `src/agent_kit/serving/app.py` |
-| Agent loop | `src/agent_kit/agent/loop.py` |
-| Context assembly | `src/agent_kit/agent/context.py` |
-| Token budget / eviction | `src/agent_kit/agent/budgeter.py` |
-| Working memory (buffer + token-budget rollover) | `src/agent_kit/memory/working.py` |
-| Episodic memory (vector; conversation-end embed) | `src/agent_kit/memory/episodic.py` |
-| Token estimator (shared) | `src/agent_kit/tokens.py` |
-| Factual memory (profile) | `src/agent_kit/memory/factual.py` |
-| Tool execution + authz | `src/agent_kit/tools/registry.py` |
-| Native tools (`remember_fact` / `forget_fact` / `list_facts` / `recall`) | `src/agent_kit/tools/native.py` |
-| MCP client (connect / discover / invoke external servers) | `src/agent_kit/tools/mcp.py` |
-| Event types streamed out | `src/agent_kit/agent/events.py` |
-| Wire encoding to JSON | `src/agent_kit/serving/wire.py` |
+| Startup wiring (composition root, `astart`/`aclose`) | `src/harness_kit/service.py` |
+| Entry point (WS/SSE) + lifespan (MCP connect, idle sweep) | `src/harness_kit/serving/app.py` |
+| Agent loop | `src/harness_kit/agent/loop.py` |
+| Context assembly | `src/harness_kit/agent/context.py` |
+| Token budget / eviction | `src/harness_kit/agent/budgeter.py` |
+| Working memory (buffer + token-budget rollover) | `src/harness_kit/memory/working.py` |
+| Episodic memory (vector; conversation-end embed) | `src/harness_kit/memory/episodic.py` |
+| Token estimator (shared) | `src/harness_kit/tokens.py` |
+| Factual memory (profile) | `src/harness_kit/memory/factual.py` |
+| Tool execution + authz | `src/harness_kit/tools/registry.py` |
+| Native tools (`remember_fact` / `forget_fact` / `list_facts` / `recall`) | `src/harness_kit/tools/native.py` |
+| MCP client (connect / discover / invoke external servers) | `src/harness_kit/tools/mcp.py` |
+| Event types streamed out | `src/harness_kit/agent/events.py` |
+| Wire encoding to JSON | `src/harness_kit/serving/wire.py` |

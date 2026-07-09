@@ -1,4 +1,4 @@
-"""Unit tests for the async store-write retry helper (``agent_kit.retry``).
+"""Unit tests for the async store-write retry helper (``harness_kit.retry``).
 
 Network-free and clock-free: ``asyncio.sleep`` is monkeypatched to a no-op so the
 backoff loop runs instantly while still exercising attempt counting and logging.
@@ -10,8 +10,8 @@ import logging
 
 import pytest
 
-from agent_kit.errors import AgentKitError, StoreWriteError
-from agent_kit.retry import RetryPolicy, default_retryable, retry_async, store_write
+from harness_kit.errors import HarnessKitError, StoreWriteError
+from harness_kit.retry import RetryPolicy, default_retryable, retry_async, store_write
 
 
 @pytest.fixture(autouse=True)
@@ -19,7 +19,7 @@ def _no_sleep(monkeypatch):
     async def _instant(_delay):
         return None
 
-    monkeypatch.setattr("agent_kit.retry.asyncio.sleep", _instant)
+    monkeypatch.setattr("harness_kit.retry.asyncio.sleep", _instant)
 
 
 def _counter(fail_times: int, exc: BaseException):
@@ -60,15 +60,15 @@ async def test_exhaustion_reraises_last_exception():
 
 
 async def test_non_retryable_raises_immediately():
-    op, state = _counter(fail_times=99, exc=AgentKitError("terminal"))
-    with pytest.raises(AgentKitError):
+    op, state = _counter(fail_times=99, exc=HarnessKitError("terminal"))
+    with pytest.raises(HarnessKitError):
         await retry_async(op, policy=RetryPolicy(max_retries=5), operation="t")
-    assert state["calls"] == 1  # AgentKitError is terminal → no retry
+    assert state["calls"] == 1  # HarnessKitError is terminal → no retry
 
 
 async def test_warns_once_per_retry_attempt(caplog):
     op, _ = _counter(fail_times=2, exc=ConnectionError("transient"))
-    with caplog.at_level(logging.WARNING, logger="agent_kit.retry"):
+    with caplog.at_level(logging.WARNING, logger="harness_kit.retry"):
         await retry_async(op, policy=RetryPolicy(max_retries=3), operation="myop")
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 2  # one per retried failure (not the final success)
@@ -77,7 +77,7 @@ async def test_warns_once_per_retry_attempt(caplog):
 
 def test_default_retryable_classification():
     assert default_retryable(ConnectionError()) is True  # backend transient
-    assert default_retryable(AgentKitError()) is False  # our terminal
+    assert default_retryable(HarnessKitError()) is False  # our terminal
     import asyncio
 
     assert default_retryable(asyncio.CancelledError()) is False  # control flow

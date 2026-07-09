@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_kit.skills.loader import SkillMeta
-from agent_kit.skills.manager import SkillManager
-from agent_kit.stores.memory_skills import InMemorySkillStore
-from agent_kit.tools.skill_tools import read_skill_tool
+from harness_kit.skills.loader import SkillMeta
+from harness_kit.skills.manager import SkillManager
+from harness_kit.stores.memory_skills import InMemorySkillStore
+from harness_kit.tools.skill_tools import read_skill_tool
 
 
 def _meta(name: str, body: str, tmp_path: Path) -> SkillMeta:

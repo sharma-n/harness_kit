@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from agent_kit.config import AgentKitConfig
-from agent_kit.service import AgentService
+from harness_kit.config import HarnessKitConfig
+from harness_kit.service import AgentService
 from tests.conftest import FakeEmbedder
 from tests.integration.conftest import requires_live, _load_live_cfg, run_turn
 

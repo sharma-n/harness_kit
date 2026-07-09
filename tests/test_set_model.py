@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from agent_kit.config import AgentKitConfig
-from agent_kit.serving.app import create_app
-from agent_kit.serving.wire import encode_conversation
-from agent_kit.stores.types import ConversationMeta, SessionState
+from harness_kit.config import HarnessKitConfig
+from harness_kit.serving.app import create_app
+from harness_kit.serving.wire import encode_conversation
+from harness_kit.stores.types import ConversationMeta, SessionState
 
 from tests.conftest import FakeLLM, ScriptedTurn, make_service
 
@@ -23,7 +23,7 @@ def _make_override_service(default_turns=None, override_turns=None):
     Returns (service, default_llm, override_llm, factory_calls).
     ``factory_calls`` is a list that accumulates the model names passed to the spy.
     """
-    cfg = AgentKitConfig()
+    cfg = HarnessKitConfig()
     service, default_llm = make_service(
         cfg, turns=default_turns or [ScriptedTurn(text_chunks=["default"])]
     )
