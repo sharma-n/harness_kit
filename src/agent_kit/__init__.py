@@ -5,7 +5,6 @@ from agent_kit.errors import (
     AgentKitError,
     BudgetExceededError,
     ContextOverflowError,
-    ToolExecutionError,
     UnauthorizedError,
 )
 
@@ -14,6 +13,5 @@ __all__ = [
     "AgentKitError",
     "BudgetExceededError",
     "ContextOverflowError",
-    "ToolExecutionError",
     "UnauthorizedError",
 ]

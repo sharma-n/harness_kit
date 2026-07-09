@@ -122,7 +122,8 @@ def create_app(service: AgentService) -> FastAPI:
                         # Route approval responses directly to the pending future in
                         # the running turn — no queue needed, just resolve in place.
                         service.agent.resolve_approval(
-                            payload["call_id"], bool(payload.get("approved"))
+                            payload["call_id"], bool(payload.get("approved")),
+                            conversation_id=conversation_id
                         )
                     elif payload.get("type") == "set_model":
                         # Store a per-conversation model override; takes effect on the
@@ -153,6 +154,11 @@ def create_app(service: AgentService) -> FastAPI:
                 except UnauthorizedError as exc:
                     with contextlib.suppress(Exception):
                         await websocket.send_json({"type": "error", "error": str(exc)})
+                except Exception as exc:
+                    # Catch any exception that wasn't caught by the loop itself.
+                    logger.exception("unexpected error in run_turn")
+                    with contextlib.suppress(Exception):
+                        await websocket.send_json({"type": "error", "error": f"unexpected error: {type(exc).__name__}"})
 
         try:
             await asyncio.gather(_receive(), _run_turns())
@@ -191,10 +197,14 @@ def create_app(service: AgentService) -> FastAPI:
                         # SSE is one-way: the client cannot send an approval response
                         # on this connection, so auto-deny immediately. The loop's
                         # wait_for sees the future already resolved and returns False.
-                        service.agent.resolve_approval(event.call_id, False)
+                        service.agent.resolve_approval(event.call_id, False, conversation_id=conversation_id)
                     yield _sse_frame(encode_event(event))
             except UnauthorizedError as exc:
                 yield _sse_frame({"type": "error", "error": str(exc)})
+            except Exception as exc:
+                # Catch any exception that wasn't caught by the loop itself.
+                logger.exception("unexpected error in run_turn")
+                yield _sse_frame({"type": "error", "error": f"unexpected error: {type(exc).__name__}"})
             finally:
                 # One turn per SSE request → export its spans as the stream closes.
                 telemetry.flush()

@@ -28,6 +28,7 @@ from llm_kit.llm.response import BatchItem
 from agent_kit.config.schema import DeduplicationConfig
 from agent_kit.jobs._base import load_all_user_points
 from agent_kit.llm import Embedder, LLM
+from agent_kit.retry import RetryPolicy, store_write
 from agent_kit.stores.base import VectorStore
 from agent_kit.stores.types import MemoryPoint
 
@@ -60,11 +61,13 @@ class EpisodicDeduplicator:
         embedder: object,  # OpenAICompatibleEmbedder (concrete, has embed_batch)
         llm: LLM,
         cfg: DeduplicationConfig,
+        store_retry: RetryPolicy | None = None,
     ) -> None:
         self._store = store
         self._embedder = embedder
         self._llm = llm
         self._cfg = cfg
+        self._store_retry = store_retry or RetryPolicy()
 
     async def run_for_user(self, user_id: str) -> DeduplicationResult:
         result = DeduplicationResult()
@@ -190,14 +193,22 @@ class EpisodicDeduplicator:
                     "source_conversation_ids": conv_ids,
                 },
             )
-            await self._store.add([merged])
+            await store_write(
+                lambda: self._store.add([merged]),
+                policy=self._store_retry,
+                operation="jobs.dedup.add",
+            )
 
             # Collect IDs to delete: source conv points + their moment siblings
             to_delete = list(source_point_ids)
             for cid in conv_ids:
                 to_delete.extend(moment_index.get(cid, []))
 
-            await self._store.delete(to_delete, user_id=user_id)
+            await store_write(
+                lambda: self._store.delete(to_delete, user_id=user_id),
+                policy=self._store_retry,
+                operation="jobs.dedup.delete",
+            )
             result.clusters_merged += 1
             result.points_deleted += len(to_delete)
 

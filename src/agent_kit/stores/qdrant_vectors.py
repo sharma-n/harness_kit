@@ -167,36 +167,32 @@ class QdrantVectorStore:
         self,
         user_id: str,
         kind: str | None = None,
-        offset: int = 0,
+        cursor: str | None = None,
         limit: int = 256,
-    ) -> list[MemoryPoint]:
+    ) -> tuple[list[MemoryPoint], str | None]:
         await self._ensure_collection()
         must = [FieldCondition(key="user_id", match=MatchValue(value=user_id))]
         if kind is not None:
             must.append(FieldCondition(key="kind", match=MatchValue(value=kind)))
         scroll_filter = Filter(must=must)
-        all_points: list[MemoryPoint] = []
-        next_page_offset = None
-        while True:
-            records, next_page_offset = await self._client.scroll(
-                collection_name=self._collection,
-                scroll_filter=scroll_filter,
-                limit=256,
-                offset=next_page_offset,
-                with_vectors=True,
-                with_payload=True,
+        # Pass the cursor (Qdrant's point-ID offset) directly to scroll().
+        records, next_offset = await self._client.scroll(
+            collection_name=self._collection,
+            scroll_filter=scroll_filter,
+            limit=limit,
+            offset=cursor,
+            with_vectors=True,
+            with_payload=True,
+        )
+        points: list[MemoryPoint] = []
+        for record in records:
+            payload = dict(record.payload or {})
+            original_id = payload.pop(_AK_ID_KEY, str(record.id))
+            vector = record.vector or []
+            if isinstance(vector, dict):
+                vector = list(next(iter(vector.values()), []))
+            points.append(
+                MemoryPoint(id=original_id, vector=list(vector), payload=payload)
             )
-            for record in records:
-                payload = dict(record.payload or {})
-                original_id = payload.pop(_AK_ID_KEY, str(record.id))
-                vector = record.vector or []
-                if isinstance(vector, dict):
-                    vector = list(next(iter(vector.values()), []))
-                all_points.append(
-                    MemoryPoint(id=original_id, vector=list(vector), payload=payload)
-                )
-            if next_page_offset is None:
-                break
-        # Sort by ts ascending for deterministic pagination (same as in-memory adapter).
-        all_points.sort(key=lambda p: p.payload.get("ts", 0.0))
-        return all_points[offset : offset + limit]
+        # Return the page and the next cursor (None signals end of enumeration).
+        return points, next_offset

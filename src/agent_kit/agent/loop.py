@@ -33,6 +33,7 @@ from agent_kit.agent.events import (
     ToolCallStarted,
     ToolResult,
     TurnComplete,
+    TurnFailed,
 )
 from agent_kit.config import AgentConfig
 from agent_kit.errors import UnauthorizedError
@@ -68,7 +69,9 @@ class Agent:
         self._factual = factual
         self._cfg = cfg
         self._bg_tasks: set[asyncio.Task] = set()
-        self._pending_approvals: dict[str, asyncio.Future[bool]] = {}
+        # call_id -> (future, conversation_id) to ensure approvals are only resolved
+        # by connections that own the conversation.
+        self._pending_approvals: dict[str, tuple[asyncio.Future[bool], str]] = {}
 
     async def run_turn(
         self, user_id: str, conversation_id: str, user_message: str
@@ -102,6 +105,7 @@ class Agent:
             iterations = 0
             stop_reason = "completed"
             assistant_texts: list[str] = []
+            tool_turns: list[Turn] = []  # Persisted tool-call/tool-result turns
 
             deadline = (
                 asyncio.get_event_loop().time() + self._cfg.per_turn_budget_s
@@ -109,97 +113,113 @@ class Agent:
                 else None
             )
 
-            for iterations in range(1, self._cfg.max_iterations + 1):
-                if deadline is not None and asyncio.get_event_loop().time() > deadline:
-                    stop_reason = "turn_budget_exceeded"
-                    break
+            try:
+                for iterations in range(1, self._cfg.max_iterations + 1):
+                    if deadline is not None and asyncio.get_event_loop().time() > deadline:
+                        stop_reason = "turn_budget_exceeded"
+                        break
 
-                response = None
-                async for event in llm.invoke_stream(messages, tools=ctx.tools):
-                    if isinstance(event, TextChunk):
-                        if event.text:
-                            if not _ttft_recorded:
-                                _metrics.record_ttft(time.monotonic() - _t0)
-                                _ttft_recorded = True
-                            yield TextDelta(event.text)
-                    elif isinstance(event, StreamEnd):
-                        response = event.response
+                    response = None
+                    async for event in llm.invoke_stream(messages, tools=ctx.tools):
+                        if isinstance(event, TextChunk):
+                            if event.text:
+                                if not _ttft_recorded:
+                                    _metrics.record_ttft(time.monotonic() - _t0)
+                                    _ttft_recorded = True
+                                yield TextDelta(event.text)
+                        elif isinstance(event, StreamEnd):
+                            response = event.response
 
-                if response is None:  # stream produced no terminal — treat as done
-                    stop_reason = "no_response"
-                    break
+                    if response is None:  # stream produced no terminal — treat as done
+                        stop_reason = "no_response"
+                        break
 
-                usage = _accumulate(usage, response.usage)
-                if response.text:
-                    assistant_texts.append(response.text)
+                    usage = _accumulate(usage, response.usage)
+                    if response.text:
+                        assistant_texts.append(response.text)
 
-                tool_calls = response.tool_calls
-                if not tool_calls:
-                    stop_reason = "completed"
-                    break  # the model answered
+                    tool_calls = response.tool_calls
+                    if not tool_calls:
+                        stop_reason = "completed"
+                        break  # the model answered
 
-                # Replay the assistant's tool-call turn, then each observation.
-                messages.append(
-                    Message.assistant_tool_calls(tool_calls, text=response.text or None)
-                )
-                for call in tool_calls:
-                    policy = self._registry.get_policy(call.name)
-                    if policy and policy.requires_approval:
-                        fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-                        self._pending_approvals[call.id] = fut
-                        yield ToolApprovalRequired(
-                            call_id=call.id,
-                            name=call.name,
-                            arguments=call.arguments,
-                            timeout_s=policy.approval_timeout_s,
+                    # Replay the assistant's tool-call turn, then each observation.
+                    messages.append(
+                        Message.assistant_tool_calls(tool_calls, text=response.text or None)
+                    )
+                    for call in tool_calls:
+                        policy = self._registry.get_policy(call.name)
+                        if policy and policy.requires_approval:
+                            fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+                            self._pending_approvals[call.id] = (fut, conversation_id)
+                            yield ToolApprovalRequired(
+                                call_id=call.id,
+                                name=call.name,
+                                arguments=call.arguments,
+                                timeout_s=policy.approval_timeout_s,
+                            )
+                            timed_out = False
+                            try:
+                                approved = await asyncio.wait_for(
+                                    fut, timeout=policy.approval_timeout_s
+                                )
+                            except asyncio.TimeoutError:
+                                approved = False
+                                timed_out = True
+                            finally:
+                                self._pending_approvals.pop(call.id, None)
+                            if not approved:
+                                reason = (
+                                    f"tool {call.name!r} — approval request timed out"
+                                    if timed_out
+                                    else f"tool {call.name!r} — user denied approval"
+                                )
+                                yield ToolResult(
+                                    call_id=call.id, name=call.name, ok=False, content=reason
+                                )
+                                messages.append(Message.tool_result(call.id, reason))
+                                continue
+
+                        yield ToolCallStarted(
+                            call_id=call.id, name=call.name, arguments=call.arguments
                         )
-                        timed_out = False
-                        try:
-                            approved = await asyncio.wait_for(
-                                fut, timeout=policy.approval_timeout_s
-                            )
-                        except asyncio.TimeoutError:
-                            approved = False
-                            timed_out = True
-                        finally:
-                            self._pending_approvals.pop(call.id, None)
-                        if not approved:
-                            reason = (
-                                f"tool {call.name!r} — approval request timed out"
-                                if timed_out
-                                else f"tool {call.name!r} — user denied approval"
-                            )
-                            yield ToolResult(
-                                call_id=call.id, name=call.name, ok=False, content=reason
-                            )
-                            messages.append(Message.tool_result(call.id, reason))
-                            continue
+                        execution = await self._registry.execute(user_id, call)
+                        yield ToolResult(
+                            call_id=execution.call_id,
+                            name=execution.name,
+                            ok=execution.ok,
+                            content=execution.display,
+                        )
+                        messages.append(Message.tool_result(call.id, execution.observation))
+                        # Persist tool turns using truncated display text, not full observation.
+                        tool_turns.append(Turn(role="assistant", text="", tool_calls=[call]))
+                        tool_turns.append(Turn(role="tool", text=execution.display, tool_call_id=call.id))
+                else:
+                    # for-loop exhausted without break → hit the iteration cap.
+                    stop_reason = "max_iterations"
 
-                    yield ToolCallStarted(
-                        call_id=call.id, name=call.name, arguments=call.arguments
-                    )
-                    execution = await self._registry.execute(user_id, call)
-                    yield ToolResult(
-                        call_id=execution.call_id,
-                        name=execution.name,
-                        ok=execution.ok,
-                        content=execution.display,
-                    )
-                    messages.append(Message.tool_result(call.id, execution.observation))
-            else:
-                # for-loop exhausted without break → hit the iteration cap.
-                stop_reason = "max_iterations"
-
-            await self._persist(user_id, conversation_id, user_message, assistant_texts)
-            _metrics.record_turn(time.monotonic() - _t0, iterations)
-            turn.set_attributes(
-                iterations=iterations,
-                stop_reason=stop_reason,
-                input_tokens=usage.prompt_tokens,
-                output_tokens=usage.completion_tokens,
-                total_tokens=usage.total_tokens,
-            )
-            yield TurnComplete(usage=usage, iterations=iterations, stop_reason=stop_reason)
+                await self._persist(user_id, conversation_id, user_message, assistant_texts, tool_turns)
+                _metrics.record_turn(time.monotonic() - _t0, iterations)
+                turn.set_attributes(
+                    iterations=iterations,
+                    stop_reason=stop_reason,
+                    input_tokens=usage.prompt_tokens,
+                    output_tokens=usage.completion_tokens,
+                    total_tokens=usage.total_tokens,
+                )
+                yield TurnComplete(usage=usage, iterations=iterations, stop_reason=stop_reason)
+            except Exception as e:
+                # Crash safety: persist whatever state we have before the failure.
+                try:
+                    await self._persist(user_id, conversation_id, user_message, assistant_texts, tool_turns)
+                except Exception:
+                    # If persistence itself fails, log but don't mask the original error.
+                    logger.exception("failed to persist partial turn state after loop exception")
+                # Emit error event so client gets a frame instead of ungraceful disconnect.
+                error_msg = f"turn failed: {type(e).__name__}: {str(e)}"
+                yield TurnFailed(error=error_msg)
+                # Re-raise so telemetry/outer handlers still see the failure.
+                raise
 
     async def _persist(
         self,
@@ -207,6 +227,7 @@ class Agent:
         conversation_id: str,
         user_message: str,
         assistant_texts: list[str],
+        tool_turns: list[Turn] | None = None,
     ) -> None:
         # Synchronous, hot-path write to working memory.
         await self._working.append_turn(conversation_id, Turn(role="user", text=user_message))
@@ -215,6 +236,10 @@ class Agent:
             await self._working.append_turn(
                 conversation_id, Turn(role="assistant", text=final_text)
             )
+        # Append tool turns (call + result pairs) in order.
+        if tool_turns:
+            for tool_turn in tool_turns:
+                await self._working.append_turn(conversation_id, tool_turn)
 
         # Off the hot path: factual extraction + token-budget-driven rollover of the
         # working buffer into the rolling summary. Episodic embedding is deferred to
@@ -233,16 +258,19 @@ class Agent:
             conversation_id=conversation_id,
         )
 
-    def resolve_approval(self, call_id: str, approved: bool) -> None:
+    def resolve_approval(self, call_id: str, approved: bool, *, conversation_id: str) -> None:
         """Resolve a pending tool-approval request from the serving layer.
 
         Called by the WebSocket handler when the client sends an approval message,
         or immediately by the SSE handler to auto-deny (SSE is one-way). A stale
-        or unknown ``call_id`` is silently ignored.
+        or unknown ``call_id``, or one belonging to a different conversation, is
+        silently ignored.
         """
-        fut = self._pending_approvals.pop(call_id, None)
-        if fut and not fut.done():
-            fut.set_result(approved)
+        entry = self._pending_approvals.pop(call_id, None)
+        if entry is not None:
+            fut, owner_conversation_id = entry
+            if owner_conversation_id == conversation_id and not fut.done():
+                fut.set_result(approved)
 
     async def end_conversation(self, user_id: str, conversation_id: str) -> None:
         """Embed the whole conversation as one episodic point and mark it finalized.

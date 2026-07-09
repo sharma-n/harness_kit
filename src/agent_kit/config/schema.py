@@ -265,8 +265,8 @@ class SkillsConfig:
 
     ``paths`` is a list of directories to scan at startup. Each immediate
     subdirectory containing a ``SKILL.md`` file is loaded as a skill. Paths
-    support ``${VAR}`` interpolation. Skills are globally visible to all users
-    in v1 (the ``SkillStore`` Protocol gates per-user visibility in v2).
+    support ``${VAR}`` interpolation. Per-user skill visibility is managed by
+    ``SkillStore``.
     """
 
     paths: list[str] = field(default_factory=list)

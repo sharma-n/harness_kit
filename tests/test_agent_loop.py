@@ -161,7 +161,7 @@ async def _collect_with_approval(
     async for event in agent.run_turn(user_id, convo, msg):
         events.append(event)
         if isinstance(event, ToolApprovalRequired):
-            agent.resolve_approval(event.call_id, approve.get(event.call_id, False))
+            agent.resolve_approval(event.call_id, approve.get(event.call_id, False), conversation_id=convo)
     await agent.drain()
     return events
 

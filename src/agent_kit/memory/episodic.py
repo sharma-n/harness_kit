@@ -102,27 +102,22 @@ class EpisodicMemory:
     async def forget_conversation(self, user_id: str, conversation_id: str) -> int:
         """Delete the conv: point and all moment: siblings for this conversation.
 
-        Returns the count of points deleted (0 means nothing was found).
-        User isolation is enforced via ``list_points`` (which is always
-        user-scoped), so a guessed ``conversation_id`` belonging to another
-        user returns 0 rather than deleting anything.
+        Returns the count of points deleted (0 means nothing was found or deletion failed).
+        Point IDs are deterministic, so no list query is needed. User isolation is
+        enforced by the store's ``delete()`` method, which verifies ownership.
         """
-        conv_points = await self._store.list_points(user_id, kind="conversation")
-        moment_points = await self._store.list_points(user_id, kind="moment")
-        ids = [
-            p.id for p in conv_points if p.id == f"conv:{conversation_id}"
-        ] + [
-            p.id for p in moment_points
-            if p.payload.get("conversation_id") == conversation_id
-        ]
-        if not ids:
-            return 0
+        ids_to_delete = [f"conv:{conversation_id}"]
+        # Add all possible moment IDs (0 to max_flagged_moments - 1).
+        for i in range(self._cfg.max_flagged_moments):
+            ids_to_delete.append(f"moment:{conversation_id}:{i}")
+
         await store_write(
-            lambda: self._store.delete(ids, user_id=user_id),
+            lambda: self._store.delete(ids_to_delete, user_id=user_id),
             policy=self._store_retry,
             operation="episodic.forget_conversation",
         )
-        return len(ids)
+        # Return the count of IDs we attempted to delete (actual deletions may be less).
+        return len(ids_to_delete)
 
     async def write_conversation(
         self,

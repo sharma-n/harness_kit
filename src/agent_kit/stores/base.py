@@ -101,20 +101,30 @@ class VectorStore(Protocol):
         self,
         user_id: str,
         kind: str | None = None,
-        offset: int = 0,
+        cursor: str | None = None,
         limit: int = 256,
-    ) -> list[MemoryPoint]:
+    ) -> tuple[list[MemoryPoint], str | None]:
         """Paginated enumeration of a user's points, optionally filtered by
         ``kind`` ("conversation" | "moment").  User-scoped: only returns points
-        owned by ``user_id``.  Stable ordering by ``ts`` ascending so that
-        pagination is deterministic.
+        owned by ``user_id``.  Returns (points, next_cursor) where ``next_cursor``
+        is None when the last page is reached. Ordering is stable and suitable for
+        full traversal but not necessarily sorted.
         """
         ...
 
 
 @runtime_checkable
 class PermissionStore(Protocol):
-    """Per-user tool allowlist (the multi-user authorization seam)."""
+    """Per-user tool allowlist (the multi-user authorization seam).
+
+    Allowed tools are computed as:
+        allowed(user_id) = (default ∪ granted_delta) − revoked_delta
+
+    This ensures that users automatically see future additions to the global default
+    set, unless they explicitly revoke a tool. An explicit revoke is a stronger
+    signal than a later default addition, so revoked tools stay revoked even if
+    they're added to the default later.
+    """
 
     async def allowed_tools(self, user_id: str) -> set[str]: ...
 
@@ -125,6 +135,7 @@ class PermissionStore(Protocol):
     async def extend_default_allowed(self, names: set[str]) -> None:
         """Fold ``names`` into the global default allowlist (the fallback for users
         with no explicit grant). Used at startup for ``auto_allow`` MCP servers.
+        Automatically flows to all users except those who explicitly revoke.
         """
         ...
 

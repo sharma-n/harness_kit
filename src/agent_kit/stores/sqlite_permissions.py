@@ -3,11 +3,14 @@
 Swapping to Postgres is a connection-string change only.
 
 Table schema:
-    permissions(user_id TEXT PK, allowed_json TEXT)
+    permissions(user_id TEXT PK, granted_json TEXT, revoked_json TEXT)
 
-The global default fallback is stored as a sentinel row with
-user_id='__default__'. A user with no explicit row in the table falls back to
-this row, mirroring the in-memory two-tier (default + per-user grants) model.
+Per-user allowed tools are computed as:
+  allowed = (default ∪ granted) − revoked
+
+The global default fallback is stored as a sentinel row with user_id='__default__'.
+A user with no explicit row in the table falls back to this row, then union with
+any explicit grants and subtract explicit revokes, mirroring the in-memory model.
 
 Lazy schema creation on first access via an asyncio.Lock.
 """
@@ -43,7 +46,8 @@ class SqlitePermissionStore:
             "permissions",
             self._metadata,
             Column("user_id", Text, primary_key=True),
-            Column("allowed_json", Text, nullable=False),
+            Column("granted_json", Text, nullable=False),
+            Column("revoked_json", Text, nullable=False),
         )
         self._init_lock = asyncio.Lock()
         self._initialized = False
@@ -66,7 +70,8 @@ class SqlitePermissionStore:
                     await conn.execute(
                         self._table.insert().values(
                             user_id=_DEFAULT_SENTINEL,
-                            allowed_json=json.dumps(list(self._default_allowed)),
+                            granted_json=json.dumps(list(self._default_allowed)),
+                            revoked_json=json.dumps([]),
                         )
                     )
             self._initialized = True
@@ -77,57 +82,73 @@ class SqlitePermissionStore:
         )).first()
         if row is None:
             return set(self._default_allowed)
-        return set(json.loads(row.allowed_json))
+        return set(json.loads(row.granted_json))
 
-    async def _get_user(self, conn, user_id: str) -> set[str] | None:
+    async def _get_user_grants_revokes(self, conn, user_id: str) -> tuple[set[str], set[str]] | None:
+        """Return (granted, revoked) for a user, or None if no explicit row."""
         row = (await conn.execute(
             select(self._table).where(self._table.c.user_id == user_id)
         )).first()
         if row is None:
             return None
-        return set(json.loads(row.allowed_json))
+        granted = set(json.loads(row.granted_json))
+        revoked = set(json.loads(row.revoked_json))
+        return granted, revoked
 
-    async def _upsert(self, conn, user_id: str, allowed: set[str]) -> None:
-        existing = await self._get_user(conn, user_id)
+    async def _upsert(self, conn, user_id: str, granted: set[str], revoked: set[str]) -> None:
+        existing = await self._get_user_grants_revokes(conn, user_id)
         if existing is None:
             await conn.execute(
                 self._table.insert().values(
                     user_id=user_id,
-                    allowed_json=json.dumps(list(allowed)),
+                    granted_json=json.dumps(list(granted)),
+                    revoked_json=json.dumps(list(revoked)),
                 )
             )
         else:
             await conn.execute(
                 self._table.update()
                 .where(self._table.c.user_id == user_id)
-                .values(allowed_json=json.dumps(list(allowed)))
+                .values(
+                    granted_json=json.dumps(list(granted)),
+                    revoked_json=json.dumps(list(revoked)),
+                )
             )
 
     async def allowed_tools(self, user_id: str) -> set[str]:
         await self._ensure_init()
         async with self._engine.connect() as conn:
-            user_set = await self._get_user(conn, user_id)
-            if user_set is not None:
-                return user_set
-            return await self._get_default(conn)
+            default = await self._get_default(conn)
+            user_deltas = await self._get_user_grants_revokes(conn, user_id)
+            if user_deltas is None:
+                return default
+            granted, revoked = user_deltas
+            allowed = (default | granted) - revoked
+            return allowed
 
     async def grant(self, user_id: str, tools: set[str]) -> None:
         await self._ensure_init()
         async with self._engine.begin() as conn:
-            current = await self._get_user(conn, user_id)
-            if current is None:
-                current = await self._get_default(conn)
-            current.update(tools)
-            await self._upsert(conn, user_id, current)
+            user_deltas = await self._get_user_grants_revokes(conn, user_id)
+            if user_deltas is None:
+                granted, revoked = set(), set()
+            else:
+                granted, revoked = user_deltas
+            granted.update(tools)
+            revoked.difference_update(tools)
+            await self._upsert(conn, user_id, granted, revoked)
 
     async def revoke(self, user_id: str, tools: set[str]) -> None:
         await self._ensure_init()
         async with self._engine.begin() as conn:
-            current = await self._get_user(conn, user_id)
-            if current is None:
-                current = await self._get_default(conn)
-            current.difference_update(tools)
-            await self._upsert(conn, user_id, current)
+            user_deltas = await self._get_user_grants_revokes(conn, user_id)
+            if user_deltas is None:
+                granted, revoked = set(), set()
+            else:
+                granted, revoked = user_deltas
+            revoked.update(tools)
+            granted.difference_update(tools)
+            await self._upsert(conn, user_id, granted, revoked)
 
     async def extend_default_allowed(self, names: set[str]) -> None:
         await self._ensure_init()
@@ -137,5 +158,5 @@ class SqlitePermissionStore:
             await conn.execute(
                 self._table.update()
                 .where(self._table.c.user_id == _DEFAULT_SENTINEL)
-                .values(allowed_json=json.dumps(list(current)))
+                .values(granted_json=json.dumps(list(current)))
             )

@@ -64,13 +64,18 @@ class InMemoryVectorStore:
         self,
         user_id: str,
         kind: str | None = None,
-        offset: int = 0,
+        cursor: str | None = None,
         limit: int = 256,
-    ) -> list[MemoryPoint]:
+    ) -> tuple[list[MemoryPoint], str | None]:
         candidates = [
             p for p in self._points.values()
             if p.payload.get("user_id") == user_id
             and (kind is None or p.payload.get("kind") == kind)
         ]
         candidates.sort(key=lambda p: p.payload.get("ts", 0.0))
-        return candidates[offset : offset + limit]
+        # Cursor is a string index; None means start from 0.
+        offset = int(cursor) if cursor is not None else 0
+        page = candidates[offset : offset + limit]
+        # Next cursor is None if we've reached the end, else the next offset.
+        next_cursor = str(offset + limit) if len(page) == limit else None
+        return page, next_cursor

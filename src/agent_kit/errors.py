@@ -16,15 +16,6 @@ class UnauthorizedError(AgentKitError):
     """A user tried to access a conversation/session owned by someone else."""
 
 
-class ToolExecutionError(AgentKitError):
-    """A tool failed in a way that is not a recoverable observation.
-
-    Note: ordinary tool failures (raised, timed out, denied) are turned into
-    ``ToolResult(ok=False)`` observations and fed back to the model — they do
-    *not* raise. This is reserved for registry-level misuse (unknown tool name).
-    """
-
-
 class ContextOverflowError(AgentKitError):
     """Tier-0 context (system + current message + tool defs) alone overflows."""
 

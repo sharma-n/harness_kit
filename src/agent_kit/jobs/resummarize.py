@@ -24,6 +24,7 @@ from llm_kit.llm.response import BatchItem
 from agent_kit.config.schema import ResummarizationConfig
 from agent_kit.jobs._base import load_all_user_points
 from agent_kit.llm import LLM
+from agent_kit.retry import RetryPolicy, store_write
 from agent_kit.stores.base import VectorStore
 from agent_kit.stores.types import MemoryPoint
 
@@ -53,11 +54,13 @@ class EpisodicResummarizer:
         embedder: object,  # OpenAICompatibleEmbedder (concrete, has embed_batch)
         llm: LLM,
         cfg: ResummarizationConfig,
+        store_retry: RetryPolicy | None = None,
     ) -> None:
         self._store = store
         self._embedder = embedder
         self._llm = llm
         self._cfg = cfg
+        self._store_retry = store_retry or RetryPolicy()
 
     async def run_for_user(self, user_id: str) -> ResummarizationResult:
         result = ResummarizationResult()
@@ -144,7 +147,11 @@ class EpisodicResummarizer:
             )
 
         if updated_points:
-            await self._store.add(updated_points)
+            await store_write(
+                lambda: self._store.add(updated_points),
+                policy=self._store_retry,
+                operation="jobs.resummarize.add",
+            )
             result.updated = len(updated_points)
 
         return result

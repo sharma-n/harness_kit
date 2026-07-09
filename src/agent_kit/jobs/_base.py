@@ -14,11 +14,11 @@ async def load_all_user_points(
 ) -> list[MemoryPoint]:
     """Collect all points for a user via paginated ``list_points`` calls."""
     all_points: list[MemoryPoint] = []
-    offset = 0
+    cursor = None
     while True:
-        page = await store.list_points(user_id, kind=kind, offset=offset, limit=page_size)
+        page, next_cursor = await store.list_points(user_id, kind=kind, cursor=cursor, limit=page_size)
         all_points.extend(page)
-        if len(page) < page_size:
+        if next_cursor is None:
             break
-        offset += page_size
+        cursor = next_cursor
     return all_points

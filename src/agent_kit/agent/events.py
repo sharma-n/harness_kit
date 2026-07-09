@@ -21,6 +21,7 @@ __all__ = [
     "ToolApprovalRequired",
     "ToolResult",
     "TurnComplete",
+    "TurnFailed",
 ]
 
 
@@ -83,4 +84,16 @@ class TurnComplete:
     stop_reason: str
 
 
-AgentEvent = TextDelta | ToolCallStarted | ToolApprovalRequired | ToolResult | TurnComplete
+@dataclass(slots=True)
+class TurnFailed:
+    """Terminal event: a turn failed with an error before completing normally.
+
+    Carries a human-readable error message for the client. Whatever partial state
+    was completable before the failure (e.g., assistant text, tool calls) has already
+    been persisted.
+    """
+
+    error: str
+
+
+AgentEvent = TextDelta | ToolCallStarted | ToolApprovalRequired | ToolResult | TurnComplete | TurnFailed

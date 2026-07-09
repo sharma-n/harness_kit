@@ -99,9 +99,3 @@ class MemoryHit:
     score: float
 
 
-@dataclass(slots=True)
-class ToolPermissions:
-    """The set of tool names a user is allowed to use."""
-
-    user_id: str
-    allowed: set[str] = field(default_factory=set)

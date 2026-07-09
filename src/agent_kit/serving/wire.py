@@ -16,6 +16,7 @@ from agent_kit.agent.events import (
     ToolCallStarted,
     ToolResult,
     TurnComplete,
+    TurnFailed,
 )
 from agent_kit.stores.types import ConversationMeta
 
@@ -52,6 +53,11 @@ def encode_event(event: AgentEvent) -> dict[str, Any]:
             "usage": asdict(event.usage),
             "iterations": event.iterations,
             "stop_reason": event.stop_reason,
+        }
+    if isinstance(event, TurnFailed):
+        return {
+            "type": "error",
+            "error": event.error,
         }
     raise TypeError(f"unknown event type: {type(event).__name__}")
 
