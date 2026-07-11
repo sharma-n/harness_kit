@@ -411,6 +411,72 @@ stores. Mirrors `llm_kit`'s own fake-driven posture. **No live-key tests in-repo
 today** — but that will change (see ROADMAP: live integration testing is a planned,
 opt-in, key-gated suite). Keep new unit tests network-free.
 
+## Project wiki (docs/wiki/)
+
+This project maintains a self-referential wiki — a persistent, cross-linked knowledge
+base about harness_kit itself: design decisions, architectural concepts, module
+responsibilities, and design rationale. It's built using Claude Code skills that read
+the codebase and existing docs, synthesize them into wiki pages, and keep the wiki
+current as the project evolves.
+
+**Architecture: three layers.**
+
+1. **Sources** — the codebase and existing project docs (`CLAUDE.md`, `ROADMAP.md`,
+   `docs/config.md`, `docs/conversation_flow.md`, `src/harness_kit/**`) are the
+   primary, authoritative source of truth. Additionally, `docs/raw/` holds external
+   reference material (meeting notes, articles, design documents) — immutable once
+   filed.
+2. **Wiki** — `docs/wiki/` is LLM-owned, generated markdown. Pages are organized by
+   category: `entities/` (modules, subsystems, tools), `concepts/` (recurring ideas
+   and patterns), `decisions/` (design rationale and tradeoffs), `sources/` (summaries
+   of external documents), `synthesis/` (high-level analysis tying multiple topics).
+   `index.md` is a content-oriented catalog; `log.md` is an append-only operation
+   log.
+3. **Schema** — this section of CLAUDE.md documents conventions (frontmatter, naming,
+   workflows) so the skills know how to build and maintain the wiki consistently.
+
+**Page frontmatter** (every page under `docs/wiki/pages/`):
+
+```yaml
+---
+title: <Page Title>
+category: concept|entity|decision|source|synthesis
+tags: [tag1, tag2, ...]
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+sources: [src/harness_kit/agent/loop.py, CLAUDE.md#Skills design decisions, docs/raw/design-notes.md, ...]
+status: draft|current|superseded
+---
+```
+
+`sources:` records provenance — code/doc paths for code-derived pages, `docs/raw/<file>`
+for external documents. Cross-references use `[[pages/<category>/<slug>]]` (Obsidian
+style, matching the spec's graph-view workflow).
+
+**Index and log.**
+
+- `index.md` — catalog organized by category (`## Sources`, `## Concepts`, etc.),
+  each entry a one-line link + one-line summary + date. Updated on every ingest or
+  query-file.
+- `log.md` — append-only chronological record: `## [YYYY-MM-DD] <op> | <Title>`,
+  where `op ∈ {ingest, query, lint}`. Parseable: `grep "^## \[" docs/wiki/log.md |
+  tail -5` shows recent activity.
+
+**Skills** (three Claude Code slash commands, in `.claude/skills/`):
+
+- **`/wiki-ingest <path-or-topic>`** — read a code path, project doc, or external
+  document; synthesize wiki pages and integrate them into the existing structure.
+  Supports two modes: code ingest (read the codebase in place) and document ingest
+  (save external material to `docs/raw/` first). Stays involved — discusses takeaways
+  with the user and confirms before broad edits. Flags contradictions if new material
+  conflicts with existing pages.
+- **`/wiki-query <question>`** — search the compiled wiki (starting from `index.md`)
+  and synthesize an answer with citations. Optionally files nontrivial synthesis
+  back into the wiki as a new `synthesis/` or updated `concepts/` page (asks first).
+- **`/wiki-lint`** — audit the wiki for broken links, orphan pages, missing index
+  entries, contradictions, stale claims, and missing cross-references. Reports
+  findings grouped by severity; asks the user before structural changes.
+
 ## When you change something
 
 - Re-run `uv run pytest`. The golden context test (`tests/test_context.py`) asserts
